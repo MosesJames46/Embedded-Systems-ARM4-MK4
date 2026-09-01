@@ -25,6 +25,10 @@ The structure of this GitHub is as follows:
 |
 |- Readme
 |
+|- ESP32 Verification
+|
+|- AR4 Fabrication
+|
 |- Issues encountered
 |--- Hardware
 |--- Software
