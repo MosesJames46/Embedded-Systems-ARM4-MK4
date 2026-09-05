@@ -26,6 +26,7 @@ The structure of this GitHub is as follows:
 |- Readme
 |
 |- ESP32 Verification
+|--- src and platformio.ini for the test program LED
 |
 |- AR4 Fabrication
 |
