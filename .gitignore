@@ -1,0 +1,18 @@
+# Created by venv; see https://docs.python.org/3/library/venv.html
+#Pyhton Virtual Env
+.venv/
+
+#Cache
+__pycache__/
+*.pyc
+
+#vscode settings
+.vscode/
+
+
+#virtual env
+.env
+
+#OS-generate files
+.DS_Store
+Thumbs.db
