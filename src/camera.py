@@ -1,5 +1,6 @@
 
 import cv2
+import numpy as np
 
 '''
     The camera pyhton file uses the cv2 library from opencv to capture webcam frames.
@@ -67,17 +68,3 @@ class Camera:
         
     def destroy_windows():
         cv2.destroyAllWindows()
-        
-camera = Camera(0)
-
-camera.start()
-while True:
-
-    camera.show_frame()
-    # Exit when Q is pressed
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-        break
-
-# Release resources
-camera.stop()
-cv2.destroyAllWindows()
