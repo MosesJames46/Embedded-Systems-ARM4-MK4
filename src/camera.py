@@ -1,6 +1,5 @@
 
 import cv2
-import numpy as np
 
 '''
     The camera pyhton file uses the cv2 library from opencv to capture webcam frames.
