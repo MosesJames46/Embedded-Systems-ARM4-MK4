@@ -6,15 +6,15 @@ The goal of this project is to assemble the AR4-MK4 robot during the Fall 26 sem
 ## Team and Responsibilities
 The team consists of Miah, Moses, and Temmy.
 
-The tentative split of responsibilities is as follows:
+The split of responsibilities is as follows:
   ```sh
-  Mechanical assembly and fabrication - Miah 
+  Mechanical assembly and fabrication - Miah & Moses 
   
-  Electronics and wiring - Temmy
+  Electronics and wiring - Moses & Temmy
   
-  Embedded programming - Moses
+  Embedded programming - Moses & Miah
   
-  Sensors and computer vision - Temmy
+  Sensors and computer vision - Moses & Temmy
   
   Documentation and repository management - Moses & Miah
 ```
