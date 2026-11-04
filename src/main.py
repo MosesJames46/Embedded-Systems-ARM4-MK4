@@ -21,6 +21,7 @@ while run:
     CD.obtain_color_v2()
     #print(CD.cp.show_color_picker(CD.cp.window))
     #CD.cp.show_color_picker(CD.cp.window)
+    print(CD.stable_frames, CD.is_target_stable())
 
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break

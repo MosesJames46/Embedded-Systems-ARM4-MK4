@@ -31,6 +31,10 @@ class ColorDetector:
 
         # Minimum contour area to consider a detection.
         self.min_contour_area = 500
+        
+        #Values set for necessary stable frames
+        self.stable_frames = 0
+        self.required_stable_frames = 5
     
     #callback util for activating selection on window. This gets set before calling any functions so that cv2 can handle input processing.
     def mouse_callback(self, event, x, y, flags, param):
@@ -194,6 +198,25 @@ class ColorDetector:
 
         return hsv[0][0]
     
+    #Return the tracked center for the highlighted object
+    def get_tracked_center(self):
+        if self.tracked_center is None:
+            return None
+        
+        return self.tracked_center
+    
+    def get_previouis_center(self):
+            if self.previouis_center is None:
+                return None
+            
+            return self.previouis_center
+    
+    def get_movement_error(self):
+        if self.tracked_center is None or self.previous_center is None:
+            return
+        
+        return tuple(np.subtract(self.previous_center, self.tracked_center))
+    
     #The contour function draws a bounding box around the color selected in the frame.
     def get_contours(self, mask, frame):
         contours, _ = cv2.findContours(
@@ -225,53 +248,57 @@ class ColorDetector:
                 "area": area
             })
 
-
-            if not detections:
-                self.tracked_center = None
-                return frame
+        #Check for any valid detections
+        if not detections:
+            self.tracked_center = None
+            self.previous_center = None
+            self.stable_frames = 0
+            return frame
+        
+        #If this is our first detection, choose the largest object.
+        if self.previous_center is None:
+            target = max(detections, key = lambda obj: obj["area"])
             
-            #If this is our first detection, choose the largest object.
-            if self.previous_center is None:
-                target = max(detections, key = lambda obj: obj["area"])
-                
-            else:
-                
-                #Find the detection closest to the previous position by using the linagl.norm func to calculate the Euclidean dist between two points.
-                target = min(
-                    detections,
-                    key = lambda obj : np.linalg.norm(
-                        np.array(obj["center"]) - 
-                        np.array(self.previous_center)
-                    )
-                )
-                
-                #Check whether the closest detection is too far away
-                distance = np.linalg.norm(
-                    np.array(target["center"]) -
+        else:
+            
+            #Find the detection closest to the previous position by using the linagl.norm func to calculate the Euclidean dist between two points.
+            target = min(
+                detections,
+                key = lambda obj : np.linalg.norm(
+                    np.array(obj["center"]) - 
                     np.array(self.previous_center)
                 )
-                
-                if distance > self.max_tracking_distance:
-                    self.tracked_center = None
-                    self.previous_center = None
-                    return frame
+            )
             
-            #updates the tracking info
-            self.tracked_center = target["center"]
-            self.previous_center = self.tracked_center
+            #Check whether the closest detection is too far away
+            distance = np.linalg.norm(
+                np.array(target["center"]) -
+                np.array(self.previous_center)
+            )
             
-            #Draw the tracked object's bounding box
-            x, y, w, h = target["bbox"]
-            cx, cy = self.tracked_center
-            
-            cv2.rectangle(
-                    frame,
-                    (x, y),
-                    (x + w, y + h),
-                    (0, 255, 0),
-                    2
-                )
-            
+            if distance > self.max_tracking_distance:
+                self.tracked_center = None
+                self.previous_center = None
+                self.stable_frames = 0
+                return frame
+        
+        #updates the tracking info
+        self.tracked_center = target["center"]
+        self.previous_center = self.tracked_center
+        self.stable_frames += 1
+        
+        #Draw the tracked object's bounding box
+        x, y, w, h = target["bbox"]
+        cx, cy = self.tracked_center
+        
+        cv2.rectangle(
+                frame,
+                (x, y),
+                (x + w, y + h),
+                (0, 255, 0),
+                2
+            )
+        
         cv2.circle(
             frame, 
             (cx, cy),
@@ -292,6 +319,13 @@ class ColorDetector:
         )
         
         return frame
+    
+    #Will check against frames and if there is a tracked target on the screen
+    def is_target_stable(self):
+        return (
+            self.tracked_center is not None
+            and self.stable_frames >= self.required_stable_frames
+        )
     
     #Return a selectable reigion on the canvas and use those coordinates to detect color value.
     def get_area_of_intrest(self, frame):
