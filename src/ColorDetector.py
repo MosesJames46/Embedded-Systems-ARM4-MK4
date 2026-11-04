@@ -21,6 +21,16 @@ class ColorDetector:
         
         #This is to ensure that the color is persistent through iterations
         self.color_range = None
+        
+        # Tracking information
+        self.previous_center = None
+        self.tracked_center = None
+
+        # Maximum distance an object can move between frames.
+        self.max_tracking_distance = 100
+
+        # Minimum contour area to consider a detection.
+        self.min_contour_area = 500
     
     #callback util for activating selection on window. This gets set before calling any functions so that cv2 can handle input processing.
     def mouse_callback(self, event, x, y, flags, param):
@@ -191,22 +201,95 @@ class ColorDetector:
         cv2.RETR_EXTERNAL,
         cv2.CHAIN_APPROX_SIMPLE
         )
+        
+        #Array for detected objects
+        detections = []
+        
         # Draw bounding boxes around detected objects
         for contour in contours:
 
             area = cv2.contourArea(contour)
 
-            if area > 500:
+            if area < self.min_contour_area:
+                continue
 
-                x, y, w, h = cv2.boundingRect(contour)
+            x, y, w, h = cv2.boundingRect(contour)
 
-                cv2.rectangle(
+            #Obtain the center of the bounding box for tracking
+            cx = x + w // 2
+            cy = y + h // 2
+
+            detections.append({
+                "center": (cx, cy),
+                "bbox": (x, y, w, h),
+                "area": area
+            })
+
+
+            if not detections:
+                self.tracked_center = None
+                return frame
+            
+            #If this is our first detection, choose the largest object.
+            if self.previous_center is None:
+                target = max(detections, key = lambda obj: obj["area"])
+                
+            else:
+                
+                #Find the detection closest to the previous position by using the linagl.norm func to calculate the Euclidean dist between two points.
+                target = min(
+                    detections,
+                    key = lambda obj : np.linalg.norm(
+                        np.array(obj["center"]) - 
+                        np.array(self.previous_center)
+                    )
+                )
+                
+                #Check whether the closest detection is too far away
+                distance = np.linalg.norm(
+                    np.array(target["center"]) -
+                    np.array(self.previous_center)
+                )
+                
+                if distance > self.max_tracking_distance:
+                    self.tracked_center = None
+                    self.previous_center = None
+                    return frame
+            
+            #updates the tracking info
+            self.tracked_center = target["center"]
+            self.previous_center = self.tracked_center
+            
+            #Draw the tracked object's bounding box
+            x, y, w, h = target["bbox"]
+            cx, cy = self.tracked_center
+            
+            cv2.rectangle(
                     frame,
                     (x, y),
                     (x + w, y + h),
                     (0, 255, 0),
                     2
                 )
+            
+        cv2.circle(
+            frame, 
+            (cx, cy),
+            5, 
+            (0, 0, 255),
+            -1
+        )
+        
+        #Display coords
+        cv2.putText(
+            frame, 
+            f"Position: ({cx}, {cy})",
+            (x, y - 10),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            (0, 255, 0),
+            2
+        )
         
         return frame
     
