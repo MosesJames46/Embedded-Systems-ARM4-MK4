@@ -11,6 +11,9 @@ Run:
 Keys in the video window:
     G      move to hover above the current target (only when the status is READY)
     C      choose a new target (re-select its colour) - only while the arm is idle
+    M      switch single / multi-target mode (multi: every same-colour object is numbered)
+    1-9    multi mode: select target by number (or click it in the video)
+    A      multi mode: visit every READY target in turn, then park
     + / -  raise / lower the hover clearance by 5 mm (saved for next time)
     ] / [  raise / lower the target height by 5 mm (saved for next time)
     SPACE  stop the arm immediately (firmware 8.1 only)
@@ -36,6 +39,7 @@ from Camera import Camera
 from ArUcoCalibration import ArUcoCalibration
 import vision_config as cfg
 from robot_backend import connect, RobotFault
+import multi_target as mt
 
 GREEN, RED, YELLOW = (0, 200, 0), (0, 0, 255), (0, 200, 255)
 
@@ -158,7 +162,7 @@ def go_park(arm, calib):
     arm.move_joint(park["x"], park["y"], park["z"], park["rot"], cfg.SPEED_PCT)
 
 
-def hover_over(arm, calib, board_xy, pixel, status, live):
+def hover_over(arm, calib, board_xy, pixel, status, live, park=True):
     rot = calib["tool_rot"]
     bz = calib["board_z"]
     safe = bz + cfg.SAFE_Z_MM
@@ -188,8 +192,9 @@ def hover_over(arm, calib, board_xy, pixel, status, live):
         time.sleep(cfg.HOLD_SECONDS)
         status["text"] = "retreating"
         arm.move_linear(tx, ty, safe, rot, cfg.SPEED_PCT)
-        status["text"] = "parking"
-        go_park(arm, calib)
+        if park:
+            status["text"] = "parking"
+            go_park(arm, calib)
         row["result"] = "ok"
         status["text"] = "done"
     except (RobotFault, ValueError) as e:
@@ -204,6 +209,23 @@ def hover_over(arm, calib, board_xy, pixel, status, live):
             except Exception as e2:
                 print("  Retreat failed - use the E-stop if needed:", e2)
     log_row(row)
+    return row["result"] == "ok"
+
+
+def visit_all(arm, calib, targets, status, live):
+    """Hover over each target in turn (positions captured before the arm moved), then park."""
+    total = len(targets)
+    for i, (num, board_xy, pixel) in enumerate(targets, start=1):
+        print(f"\n=== Target {i}/{total} (#{num}) ===")
+        if not hover_over(arm, calib, board_xy, pixel, status, live, park=False):
+            status["text"] = f"sequence stopped at target {i}/{total}: {status['text']}"
+            return
+    status["text"] = "parking"
+    try:
+        go_park(arm, calib)
+        status["text"] = f"visited {total} targets"
+    except Exception as e:
+        status["text"] = f"park failed: {e}"
 
 
 def main():
@@ -256,6 +278,14 @@ def main():
         worker = threading.Thread(target=fn, args=a, daemon=True)
         worker.start()
     window = "Vision-guided AR4 (G=go P=park Q=quit)"
+    multi = False
+    tracker = mt.MultiTracker(cfg.STABLE_SAMPLES, cfg.STABLE_SPREAD_MM, board_limits())
+    selected_id = None
+    clicks = []
+    cv2.namedWindow(window)
+    cv2.setMouseCallback(window, lambda ev, x, y, *_: clicks.append((x, y))
+                         if ev == cv2.EVENT_LBUTTONDOWN else None)
+    print("M = switch single / multi-target mode")
     try:
         while True:
             frame = detector.camera.read()
@@ -263,17 +293,48 @@ def main():
                 print("Camera frame unavailable")
                 break
             calibrated = aruco.update(frame)
-            display = detector.process_frame(frame)
-            center = detector.get_tracked_center()
-            stable = detector.is_target_stable()
-
-            if calibrated and center is not None and stable and not busy():
-                history.append(aruco.pixel_to_workspace(center))
+            if multi:
+                display = frame.copy()
+                if not calibrated:
+                    tracker.clear()
+                elif not busy():
+                    tracker.update(mt.find_blobs(detector, frame), aruco.pixel_to_workspace)
+                center, stable = None, False
+                ready = tracker.ready()
+                if tracker.by_id(selected_id) is None:
+                    selected_id = None
+                if selected_id is None and len(ready) == 1:
+                    selected_id = ready[0][1].id   # only one candidate: select it
+                sel = tracker.by_id(selected_id)
+                if sel is not None:
+                    ok, reason = tracker.status(sel)
+                    med, center = sel.board, sel.pixel
+                    reason = "READY - G = go to selected, A = visit all" if ok else f"selected: {reason}"
+                else:
+                    ok, med = False, None
+                    reason = ("click a target or press its number" if ready
+                              else "no ready targets")
+                if not calibrated:
+                    ok, reason = False, "markers not all visible"
+                mt.draw(display, tracker, selected_id)
             else:
-                history.clear()
-            ok, reason, med = check_target(history, calibrated, stable)
+                display = detector.process_frame(frame)
+                center = detector.get_tracked_center()
+                stable = detector.is_target_stable()
+
+            if not multi:
+                if calibrated and center is not None and stable and not busy():
+                    history.append(aruco.pixel_to_workspace(center))
+                else:
+                    history.clear()
+                ok, reason, med = check_target(history, calibrated, stable)
 
             lines = [(f"markers: {sorted(aruco.visible_ids)}", GREEN if calibrated else RED)]
+            if multi:
+                sel_num = next((n for n, tr in tracker.numbered() if tr.id == selected_id), None)
+                lines.append((f"MULTI: {len(tracker.numbered())} seen, {len(ready)} ready, "
+                              f"selected {'#' + str(sel_num) if sel_num else 'none'}  (M = single)",
+                              YELLOW))
             if med is not None:
                 lines.append((f"board X {med[0]:.1f}  Y {med[1]:.1f} mm", YELLOW))
                 if calib is not None:
@@ -298,6 +359,29 @@ def main():
                 break
             if key != 255 and not busy() and adjust_live(live, key):
                 continue
+            if clicks:
+                u, v = clicks.pop()
+                clicks.clear()
+                if multi and not busy():
+                    hit = tracker.nearest_to_pixel(u, v)
+                    if hit is not None:
+                        selected_id = hit.id
+            if key == ord("m"):
+                if busy():
+                    print("Wait for the arm to finish before switching mode")
+                    continue
+                multi = not multi
+                tracker.clear()
+                history.clear()
+                selected_id = None
+                print("Mode:", "MULTI-target" if multi else "single-target")
+                continue
+            if multi and ord("1") <= key <= ord("9") and not busy():
+                want = key - ord("0")
+                hit = next((tr for n, tr in tracker.numbered() if n == want), None)
+                if hit is not None:
+                    selected_id = hit.id
+                continue
             if key == ord("c"):
                 if busy():
                     print("Wait for the arm to finish before changing the target")
@@ -313,6 +397,8 @@ def main():
                 else:
                     detector.color_range = new_range
                     history.clear()
+                    tracker.clear()
+                    selected_id = None
                     status["text"] = "new target selected"
                     print("New target selected")
                 continue
@@ -331,6 +417,17 @@ def main():
                     continue
                 history.clear()
                 run_job(hover_over, arm, calib, med, center, status, dict(live))
+            elif key == ord("a") and multi:
+                if not calibrated:
+                    print("Refused: markers not all visible")
+                    continue
+                targets = [(n, tr.board, tr.pixel) for n, tr in tracker.ready()]
+                if not targets:
+                    print("Refused: no ready targets")
+                    continue
+                print(f"Visiting {len(targets)} targets: " +
+                      ", ".join(f"#{n} ({b[0]:.0f},{b[1]:.0f})" for n, b, _ in targets))
+                run_job(visit_all, arm, calib, targets, status, dict(live))
             elif key == ord("p"):
                 def park_job():
                     try:

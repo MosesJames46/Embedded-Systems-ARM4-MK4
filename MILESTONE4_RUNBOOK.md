@@ -119,6 +119,9 @@ python main.py run
 | SPACE | Stop the arm immediately (latched until the next G/P) |
 | P | Park |
 | C | Choose a new target (re-select its colour) without restarting. Only while the arm is idle |
+| M | Switch single-target / multi-target mode |
+| 1-9 or click | Multi mode: select a target by its number, or click it in the video |
+| A | Multi mode: visit every READY target in turn (hover, retreat), then park |
 | + / - | Raise / lower the hover clearance by 5 mm |
 | ] / [ | Raise / lower the target height by 5 mm |
 | Q | Quit |
@@ -143,6 +146,18 @@ a straight-line move at 10% speed (capped at 25% in code).
 5. SPACE gives a software stop mid-move. The red lid button gives a hardware E-stop
    (firmware interrupt on pin 39). The 24 V rocker switch cuts motor power.
 6. The scripts refuse to start while the HMI holds the serial port.
+
+### Multi-target mode (several objects of the same colour)
+
+Single mode (the default) uses the team's tracker, which follows one blob. With several
+same-colour objects it picks one arbitrarily. Press **M** for multi mode: every blob of the
+selected colour is detected (`src/multi_target.py`), converted to board mm and tracked
+across frames, so each object keeps its number and gets its own stability check.
+Labels show `ready`, `settling`, `moving`, `off board` or `merged? separate objects` (a
+blob much larger than the others, likely two touching objects, which is refused). If only
+one object is ready it is selected automatically. **A** captures all ready positions
+before the arm moves (the arm blocks the camera during motion), visits them in number order,
+and parks. SPACE (firmware 8.1) or the E-stop aborts the whole sequence.
 
 ## 6. Evidence for the report
 
