@@ -118,6 +118,7 @@ python main.py run
 | G | Move to hover above the target (only when READY) |
 | SPACE | Stop the arm immediately (latched until the next G/P) |
 | P | Park |
+| C | Choose a new target (re-select its colour) without restarting. Only while the arm is idle |
 | + / - | Raise / lower the hover clearance by 5 mm |
 | ] / [ | Raise / lower the target height by 5 mm |
 | Q | Quit |

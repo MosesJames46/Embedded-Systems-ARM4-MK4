@@ -10,6 +10,7 @@ Run:
 
 Keys in the video window:
     G      move to hover above the current target (only when the status is READY)
+    C      choose a new target (re-select its colour) - only while the arm is idle
     + / -  raise / lower the hover clearance by 5 mm (saved for next time)
     ] / [  raise / lower the target height by 5 mm (saved for next time)
     SPACE  stop the arm immediately (firmware 8.1 only)
@@ -280,7 +281,7 @@ def main():
                     lines.append((f"robot X {rx:.1f}  Y {ry:.1f} mm", YELLOW))
             lines.append((f"hover {live['target_height_mm'] + live['hover_clearance_mm']:.0f} mm "
                           f"= target {live['target_height_mm']:.0f} + clear "
-                          f"{live['hover_clearance_mm']:.0f}   (+/- and ]/[)", (255, 255, 255)))
+                          f"{live['hover_clearance_mm']:.0f}   (+/- ]/[  C=new target)", (255, 255, 255)))
             if busy():
                 lines.append((f"MOVING: {status['text']}  (SPACE = stop)", YELLOW))
             else:
@@ -296,6 +297,24 @@ def main():
             if key == ord("q"):
                 break
             if key != 255 and not busy() and adjust_live(live, key):
+                continue
+            if key == ord("c"):
+                if busy():
+                    print("Wait for the arm to finish before changing the target")
+                    continue
+                print("Select the new target: drag a box over it, then ENTER (C to cancel)")
+                new_range = detector.calibrate_color()
+                try:
+                    cv2.destroyWindow("Calibration")
+                except cv2.error:
+                    pass
+                if new_range is None:
+                    print("Target change cancelled - keeping the previous target")
+                else:
+                    detector.color_range = new_range
+                    history.clear()
+                    status["text"] = "new target selected"
+                    print("New target selected")
                 continue
             if arm is None:
                 continue
