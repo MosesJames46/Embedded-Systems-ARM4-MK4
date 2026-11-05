@@ -1,0 +1,141 @@
+# Milestone 4: Vision-Guided AR4 Movement (Runbook)
+
+Goal (Checkpoint 1): detect a target in a live webcam image, convert it to a reachable
+robot pose, move the physical AR4 safely to hover above it, and do it again after the
+target is moved. Grasping is not required.
+
+## System
+
+```
+webcam -> ColorDetector (HSV colour, 5-frame stability)
+       -> ArUcoCalibration: pixel -> board mm (homography from markers 4-7)
+       -> robot_calib.json: board mm -> robot mm (affine, taught by jogging the tool over the markers)
+       -> vision_move.py safety checks -> robot_backend.py -> Teensy 4.1 (Annin firmware 8.1)
+```
+
+| File | Purpose |
+|---|---|
+| `src/vision_config.py` | All settings: marker positions, camera index, heights, speed, safety limits |
+| `src/teach_robot.py` | Jog the tool over each marker and save the board-to-robot calibration |
+| `src/vision_move.py` | The demo: live detection, safety checks, hover moves, CSV log |
+| `src/robot_backend.py` | One interface for firmware 8.1 (official Annin API) and 6.x (fallback) |
+| `src/ARrobots/ARrobot.py` | Official Annin Python API (unmodified, from Annin-Robotics/ar4-hmi @ 214558c) |
+| `src/ar4link.py` | 6.x serial link, adapted from BengalPirate/AR4_MK4_Team-Writing |
+| `firmware/AR4_teensy41_sketch_v8.1/` | Official Annin firmware 8.1 (unmodified) |
+
+## 0. One-time setup on the Ubuntu laptop
+
+```bash
+cd ~/Embedded-Systems-ARM4-MK4          # wherever the repo is cloned
+python3 -m venv venv && source venv/bin/activate
+pip install -r requirements-linux.txt
+```
+
+## 1. Flash firmware 8.1 (once)
+
+Why 8.1: it is Annin's current release. It accepts a software **stop** mid-move
+(SPACE key in our demo), solves inverse kinematics at the wrist singularity
+(J5 = 0, near the straight-down tool pose we use), returns JSON errors for
+unreachable targets, and keeps the hardware E-stop interrupt on pin 39 (the red lid button).
+
+1. Arduino IDE → Library Manager: install **ModbusMaster** and **ArduinoJson** (version 7.x).
+2. Open `firmware/AR4_teensy41_sketch_v8.1/AR4_teensy41_sketch_v8.1.ino`.
+3. Tools → Board: **Teensy 4.1**, USB Type: **Serial**, Port: the Teensy. Upload.
+4. Get the matching HMI (8.1) and run it with the existing HMI's Python environment:
+   ```bash
+   cd ~ && git clone https://github.com/Annin-Robotics/ar4-hmi.git ar4-hmi-8.1
+   cd ar4-hmi-8.1 && ~/ar4-hmi/venv/bin/python AR4.py
+   ```
+   If it reports a missing module, run `~/ar4-hmi/venv/bin/pip install <module>`.
+5. In the HMI, select robot model **AR4-MK4** and send it to the board (it reboots).
+   Until this is done the board is in safe mode and our scripts refuse to connect.
+6. Re-enter your calibration offsets / motor direction settings from the old HMI
+   config, then follow the manual's startup checks (jog each joint, limit switch test)
+   and **calibrate**. Close the HMI. (Do not power-cycle or replug the Teensy after
+   calibrating, or calibrate again.)
+
+Fallback: if 8.1 misbehaves, flash 6.7.1 again and add `--firmware 6` to every command
+(no software stop on 6.x; use the red E-stop).
+
+## 2. Board setup (before every session)
+
+- **Measure** the centre-to-centre distances between the markers and put them in
+  `MARKER_POSITIONS_MM` in `src/vision_config.py`. Marker 4 is the origin; 4→5 is +X and
+  4→7 is +Y, with 6 diagonal from 4. The current values (a 200 mm square) are placeholders
+  from main.py.
+- Tape the mat to the table. Mount the camera rigidly. If the mat, camera or robot moves,
+  re-teach (step 3).
+- Measure the target (cube) height and set `TARGET_HEIGHT_MM`.
+
+## 3. Teach the board-to-robot calibration (after any setup change)
+
+HMI closed, arm calibrated:
+
+```bash
+cd src && python teach_robot.py
+```
+
+Jog with `x+10`, `y-5`, `z-2` etc. until the tool tip is a few mm above the **centre of
+marker 4**, then `save 4`. Repeat for 5, 6 and 7. Jog to a pose clear of the camera view and
+`save park`. Then `w` writes `robot_calib.json` and prints the fit error for each marker.
+This error goes in the report as calibration evidence. Errors of a few mm are good; tens of
+mm mean a wrong marker ID or a wrong measured position.
+
+## 4. Dry run (no motion)
+
+```bash
+python vision_move.py --dry
+```
+
+Drag a box over the cube colour and press ENTER. Check that the board coordinates match a
+ruler measurement from marker 4, that moving the cube changes them, and that READY only
+appears when all markers are visible and the cube is still and inside the board.
+
+## 5. Live demo
+
+```bash
+python vision_move.py
+```
+
+| Key | Action |
+|---|---|
+| G | Move to hover above the target (only when READY) |
+| SPACE | Stop the arm immediately (latched until the next G/P) |
+| P | Park |
+| Q | Quit |
+
+Motion sequence: rise to the safe height, travel at the safe height, descend to
+`TARGET_HEIGHT + HOVER_CLEARANCE` above the board, hold 2 s, rise, park. Every segment is
+a straight-line move at 10% speed (capped at 25% in code).
+
+**Safety layers (the safety section of the rubric):**
+1. A target is rejected unless all 4 markers are visible, the detector reports a stable
+   target, and the last 10 readings agree within 4 mm.
+2. A target outside the marker square (minus a 10 mm margin) is rejected, which keeps
+   motion inside the workspace bounds.
+3. The firmware rejects unreachable poses or poses outside the joint limits (JSON error).
+   The move is aborted and the arm retreats upward.
+4. The hover height is never below the board plus 20 mm, and every travel happens at the safe height.
+5. SPACE gives a software stop mid-move. The red lid button gives a hardware E-stop
+   (firmware interrupt on pin 39). The 24 V rocker switch cuts motor power.
+6. The scripts refuse to start while the HMI holds the serial port.
+
+## 6. Evidence for the report
+
+Every move is appended to `src/vision_moves.csv`: pixel position, board mm, commanded
+robot XYZ, the robot's reported XYZ and the result. For **positioning error**,
+measure the horizontal offset between the tool tip and the cube centre with a ruler
+while the arm hovers, and type it into `measured_error_mm`. Do at least 5 positions,
+plus 3 repeats of one position for **repeatability**. The reported XYZ shows what the
+controller reached; only the ruler measurement shows the true error.
+
+Demonstrate failure handling for the rubric: cover a marker (refused), move the cube off
+the board (refused), wave the cube around (refused, jittering), and press SPACE mid-move.
+
+## Acknowledgements
+
+- Annin Robotics: firmware 8.1 and `ARrobot.py` (Annin Open Source Non-Commercial License, see `firmware/ANNIN_LICENSE.txt`).
+- `ar4link.py` adapted from BengalPirate/AR4_MK4_Team-Writing.
+- `teach_robot.py`, `vision_move.py`, `robot_backend.py` and this runbook were written with AI
+  assistance (Claude). They were tested against a simulated firmware 8.1 serial device,
+  including stops at each motion phase, and must be validated on the robot with `--dry` first.
