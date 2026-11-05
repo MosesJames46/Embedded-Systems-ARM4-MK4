@@ -1,0 +1,7 @@
+# Minimal dependencies for the Milestone 4 vision demo on Ubuntu 24.04 (Python 3.12).
+# requirements.txt is a macOS freeze (pyobjc etc.) and will not install on Linux.
+numpy
+opencv-contrib-python==4.10.0.84
+pyserial
+pygame
+pygame_widgets
