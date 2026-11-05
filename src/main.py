@@ -2,13 +2,14 @@ import cv2
 from ColorPicker import ColorPicker
 from ColorPicker import pygame
 from ColorPicker import pygame_widgets
+from ColorDetector import ColorDetector
 from Camera import Camera
 from ArUcoCalibration import ArUcoCalibration
 
 detector = ColorDetector(ColorPicker(), Camera(3))
 
-cv2.namedWindow(detector.window_name)
-cv2.setMouseCallback(detector.window_name, detector.mouse_callback)
+#cv2.namedWindow(detector.window_name)
+#cv2.setMouseCallback(detector.window_name, detector.mouse_callback)
 
 # Your existing Camera, ColorPicker, and
 # ColorDetector initialization goes above this.
