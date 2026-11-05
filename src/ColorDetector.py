@@ -35,6 +35,33 @@ class ColorDetector:
         #Values set for necessary stable frames
         self.stable_frames = 0
         self.required_stable_frames = 5
+
+    
+    def process_frame(self, frame):
+        if frame is None:
+            self.tracked_center = None
+            self.previous_center = None
+            self.stable_frames = 0
+            return None
+    
+        display_frame = frame.copy()
+    
+        if self.color_range is not None:
+            lower, upper = self.color_range
+    
+            mask = self.mask_colors(lower, upper, frame)
+            mask = self.clean_mask(mask)
+    
+            display_frame = self.get_contours(
+                mask, display_frame
+            )
+        else:
+            self.tracked_center = None
+            self.previous_center = None
+            self.stable_frames = 0
+    
+        return display_frame
+
     
     #callback util for activating selection on window. This gets set before calling any functions so that cv2 can handle input processing.
     def mouse_callback(self, event, x, y, flags, param):
