@@ -38,5 +38,7 @@ The structure of this GitHub is as follows:
 |--- Software
 |
 |- Computer Vision
+|--- Vision-Guided AR4 Movement
+    |- src <- folder with all of the python files to complete Milestone 4.
 |--- Software
   ```
