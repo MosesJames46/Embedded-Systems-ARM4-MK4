@@ -10,7 +10,7 @@ detector = cv2.aruco.ArucoDetector(
     cv2.aruco.DetectorParameters()
 )
 
-camera = cv2.VideoCapture(0)
+camera = cv2.VideoCapture(3)
 
 previous_ids = None
 

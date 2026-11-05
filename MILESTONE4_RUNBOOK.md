@@ -22,6 +22,7 @@ webcam -> ColorDetector (HSV colour, 5-frame stability)
 | `python main.py teach` | Teach the board-to-robot calibration |
 | `python main.py dry` | Full pipeline and safety checks, no motion |
 | `python main.py run` | Live demo |
+| `python main.py park` | Move the arm up and to the saved park pose |
 
 | File | Purpose |
 |---|---|
@@ -117,7 +118,14 @@ python main.py run
 | G | Move to hover above the target (only when READY) |
 | SPACE | Stop the arm immediately (latched until the next G/P) |
 | P | Park |
+| + / - | Raise / lower the hover clearance by 5 mm |
+| ] / [ | Raise / lower the target height by 5 mm |
 | Q | Quit |
+
+The height keys work while the arm is idle. The values are saved in `src/live_settings.json`
+and reused on the next run (they override `TARGET_HEIGHT_MM` / `HOVER_CLEARANCE_MM` in
+`vision_config.py`; delete the file to go back to the config values). Hover height =
+taught mat height + target height + clearance. It is kept at least 20 mm below the travel height.
 
 Motion sequence: rise to the safe height, travel at the safe height, descend to
 `TARGET_HEIGHT + HOVER_CLEARANCE` above the board, hold 2 s, rise, park. Every segment is

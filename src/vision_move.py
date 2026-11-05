@@ -10,6 +10,8 @@ Run:
 
 Keys in the video window:
     G      move to hover above the current target (only when the status is READY)
+    + / -  raise / lower the hover clearance by 5 mm (saved for next time)
+    ] / [  raise / lower the target height by 5 mm (saved for next time)
     SPACE  stop the arm immediately (firmware 8.1 only)
     P      go to the park pose
     Q      quit
@@ -28,7 +30,6 @@ from collections import deque
 import cv2
 import numpy as np
 
-from ColorPicker import ColorPicker
 from ColorDetector import ColorDetector
 from Camera import Camera
 from ArUcoCalibration import ArUcoCalibration
@@ -36,6 +37,65 @@ import vision_config as cfg
 from robot_backend import connect, RobotFault
 
 GREEN, RED, YELLOW = (0, 200, 0), (0, 0, 255), (0, 200, 255)
+
+
+LIVE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "live_settings.json")
+CLEARANCE_RANGE = (10, 120)   # mm above the target top
+TARGET_RANGE = (0, 120)       # mm, target height above the mat
+STEP_MM = 5
+
+
+def load_live():
+    """Heights adjustable from the video window; saved so they persist between runs."""
+    live = {"target_height_mm": float(cfg.TARGET_HEIGHT_MM),
+            "hover_clearance_mm": float(cfg.HOVER_CLEARANCE_MM)}
+    try:
+        with open(LIVE_FILE) as f:
+            saved = json.load(f)
+        for k in live:
+            if k in saved:
+                live[k] = float(saved[k])
+    except (OSError, ValueError):
+        pass
+    return live
+
+
+def save_live(live):
+    try:
+        with open(LIVE_FILE, "w") as f:
+            json.dump(live, f, indent=2)
+    except OSError as e:
+        print("Could not save live settings:", e)
+
+
+def adjust_live(live, key):
+    """Apply a height key. Returns True if something changed."""
+    lo_c, hi_c = CLEARANCE_RANGE
+    lo_t, hi_t = TARGET_RANGE
+    c, h = live["hover_clearance_mm"], live["target_height_mm"]
+    if key in (ord("+"), ord("=")):
+        c += STEP_MM
+    elif key in (ord("-"), ord("_")):
+        c -= STEP_MM
+    elif key == ord("]"):
+        h += STEP_MM
+    elif key == ord("["):
+        h -= STEP_MM
+    else:
+        return False
+    c = min(max(c, lo_c), hi_c)
+    h = min(max(h, lo_t), hi_t)
+    # hover must stay well below the travel height
+    if h + c > cfg.SAFE_Z_MM - 20:
+        print(f"Refused: hover {h + c:.0f} mm would be too close to the travel height "
+              f"({cfg.SAFE_Z_MM} mm)")
+        return False
+    changed = (c, h) != (live["hover_clearance_mm"], live["target_height_mm"])
+    live["hover_clearance_mm"], live["target_height_mm"] = c, h
+    if changed:
+        save_live(live)
+        print(f"Hover now {h + c:.0f} mm above the mat (target {h:.0f} + clearance {c:.0f})")
+    return changed
 
 
 def load_calib():
@@ -93,14 +153,15 @@ def go_park(arm, calib):
     p = arm.pose()
     if p["z"] < safe - 1:
         arm.move_linear(p["x"], p["y"], safe, p["rot"], cfg.SPEED_PCT)
-    arm.move_linear(park["x"], park["y"], max(park["z"], safe), park["rot"], cfg.SPEED_PCT)
+    # Joint move: avoids the wrist-flip zone that straight-line moves cross on old firmware
+    arm.move_joint(park["x"], park["y"], park["z"], park["rot"], cfg.SPEED_PCT)
 
 
-def hover_over(arm, calib, board_xy, pixel, status):
+def hover_over(arm, calib, board_xy, pixel, status, live):
     rot = calib["tool_rot"]
     bz = calib["board_z"]
     safe = bz + cfg.SAFE_Z_MM
-    hover = bz + cfg.TARGET_HEIGHT_MM + cfg.HOVER_CLEARANCE_MM
+    hover = bz + live["target_height_mm"] + live["hover_clearance_mm"]
     tx, ty = board_to_robot(calib, *board_xy)
     row = {"time": time.strftime("%H:%M:%S"), "pixel_u": round(pixel[0], 1),
            "pixel_v": round(pixel[1], 1), "board_x": round(board_xy[0], 1),
@@ -168,7 +229,9 @@ def main():
         if not arm.supports_stop:
             print("NOTE: firmware 6.x has no software stop - SPACE does nothing; use the E-stop.")
 
-    detector = ColorDetector(ColorPicker(), Camera(args.camera))
+    # ColorDetector stores its ColorPicker but never uses it; passing None avoids the
+    # frozen pygame window ("not responding" popup).
+    detector = ColorDetector(None, Camera(args.camera))
     aruco = ArUcoCalibration(cfg.MARKER_POSITIONS_MM)
     print("Drag a box over the target colour, then press ENTER.")
     detector.color_range = detector.calibrate_color()
@@ -177,6 +240,9 @@ def main():
         raise SystemExit("Colour calibration cancelled")
 
     history = deque(maxlen=cfg.STABLE_SAMPLES)
+    live = load_live()
+    print(f"Hover height: target {live['target_height_mm']:.0f} + clearance "
+          f"{live['hover_clearance_mm']:.0f} mm.  Keys: + / - clearance, ] / [ target height")
     worker = None
     status = {"text": ""}
 
@@ -212,6 +278,9 @@ def main():
                 if calib is not None:
                     rx, ry = board_to_robot(calib, *med)
                     lines.append((f"robot X {rx:.1f}  Y {ry:.1f} mm", YELLOW))
+            lines.append((f"hover {live['target_height_mm'] + live['hover_clearance_mm']:.0f} mm "
+                          f"= target {live['target_height_mm']:.0f} + clear "
+                          f"{live['hover_clearance_mm']:.0f}   (+/- and ]/[)", (255, 255, 255)))
             if busy():
                 lines.append((f"MOVING: {status['text']}  (SPACE = stop)", YELLOW))
             else:
@@ -226,6 +295,8 @@ def main():
             key = cv2.waitKey(1) & 0xFF
             if key == ord("q"):
                 break
+            if key != 255 and not busy() and adjust_live(live, key):
+                continue
             if arm is None:
                 continue
             if key == ord(" "):
@@ -240,7 +311,7 @@ def main():
                     print("Refused:", reason)
                     continue
                 history.clear()
-                run_job(hover_over, arm, calib, med, center, status)
+                run_job(hover_over, arm, calib, med, center, status, dict(live))
             elif key == ord("p"):
                 def park_job():
                     try:

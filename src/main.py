@@ -7,6 +7,8 @@ Run from the src folder:
     python main.py teach     3. Teach board-to-robot calibration (jog over markers 4-7)
     python main.py dry       4. Full pipeline with safety checks, NO robot motion
     python main.py run       5. Live demo: G = hover over target, SPACE = stop, P = park, Q = quit
+                                In the video window: + / - change hover clearance, ] / [ target height
+    python main.py park         Move the arm straight up, then to the saved park pose
 
 Extra options are passed through, e.g.
     python main.py check --camera 2
@@ -78,6 +80,39 @@ def check(argv):
     cv2.destroyAllWindows()
 
 
+def park(argv):
+    """Rise to a safe height, then joint-move to the park pose saved by teach."""
+    import argparse
+    import json
+
+    from robot_backend import connect
+
+    ap = argparse.ArgumentParser(prog="main.py park")
+    ap.add_argument("--port", default=None)
+    ap.add_argument("--firmware", choices=["8", "6"], default=None)
+    args = ap.parse_args(argv)
+    if not os.path.exists(cfg.CALIB_FILE):
+        raise SystemExit("robot_calib.json not found - run: python main.py teach")
+    with open(cfg.CALIB_FILE) as f:
+        calib = json.load(f)
+    if "park" not in calib.get("taught", {}):
+        raise SystemExit("No park pose saved - run teach and type: save park, then w")
+    p = calib["taught"]["park"]
+    fw = args.firmware or calib.get("firmware", cfg.FIRMWARE)
+    arm = connect(fw, args.port, cfg.LOOP_MODE)
+    try:
+        cur = arm.pose()
+        safe = calib["board_z"] + cfg.SAFE_Z_MM
+        if cur["z"] < safe - 1:
+            print("Rising to safe height ...")
+            arm.move_linear(cur["x"], cur["y"], safe, cur["rot"], cfg.SPEED_PCT)
+        print("Moving to park ...")
+        r = arm.move_joint(p["x"], p["y"], p["z"], p["rot"], cfg.SPEED_PCT)
+        print(f"Parked at X {r['x']:.1f}  Y {r['y']:.1f}  Z {r['z']:.1f}")
+    finally:
+        arm.close()
+
+
 def main():
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help", "help"):
@@ -86,6 +121,8 @@ def main():
     step, rest = sys.argv[1], sys.argv[2:]
     if step == "check":
         check(rest)
+    elif step == "park":
+        park(rest)
     elif step == "vision":
         sys.argv = ["vision_test.py"] + rest
         runpy.run_path(os.path.join(os.path.dirname(os.path.abspath(__file__)), "vision_test.py"),

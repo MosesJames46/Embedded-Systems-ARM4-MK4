@@ -12,9 +12,9 @@ LOG_FILE = os.path.join(HERE, "vision_moves.csv")
 # Layout checked from a photo of the mat: 5 and 7 are next to 4, 6 is diagonal from 4.
 MARKER_POSITIONS_MM = {
     4: (0, 0),
-    5: (200, 0),
-    6: (200, 200),
-    7: (0, 200),
+    5: (320, 0),
+    6: (320, 220),
+    7: (0, 220),
 }
 
 CAMERA_INDEX = 3          # same as main.py
@@ -26,7 +26,7 @@ LOOP_MODE = "000000"
 SPEED_PCT = 10            # move speed, percent (capped at 25 in ar4link)
 
 # Heights relative to the taught board height (mm)
-TARGET_HEIGHT_MM = 3      # target height above the board. Use a FLAT target (coloured
+TARGET_HEIGHT_MM = 70      # target height above the board. Use a FLAT target (coloured
                           # paper/card) - a tall cube reads offset because the camera
                           # looks at the board at an angle. Raise this if you use a cube.
 HOVER_CLEARANCE_MM = 40   # how far above the cube top the tool stops

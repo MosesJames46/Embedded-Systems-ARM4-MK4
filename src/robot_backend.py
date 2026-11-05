@@ -116,6 +116,16 @@ class V8Robot:
             raise RobotFault("Stopped by operator")
         return self._parse(final)
 
+    def move_joint(self, x, y, z, rot, speed=10):
+        """Joint-interpolated move (path not straight). Used for parking."""
+        _check_speed(speed)
+        if self.stopped:
+            raise RobotFault("Stopped by operator")
+        reply = self.r.command({"cmd": "move_j", "pose": [x, y, z] + list(rot),
+                                "spd_type": "percent", "spd": speed, "acc": 10,
+                                "dec": 10, "w": "A"}, timeout=120)
+        return self._parse(reply)
+
     def stop(self):
         self.stopped = True
         self.r.stop()
@@ -144,14 +154,27 @@ class LegacyRobot:
         from ar4link import AR4Error
         try:
             return self._conv(self.a.pose())
-        except AR4Error as e:
-            raise RobotFault(str(e))
+        except AR4Error:
+            # 6.x answers the first request after a refused move with a stale "ER"
+            time.sleep(0.3)
+            try:
+                return self._conv(self.a.pose())
+            except AR4Error as e:
+                raise RobotFault(str(e))
 
     def move_linear(self, x, y, z, rot, speed=10):
         from ar4link import AR4Error
         _check_speed(speed)
         try:
             return self._conv(self.a.move_linear(x, y, z, *rot, speed_pct=speed))
+        except AR4Error as e:
+            raise RobotFault(str(e))
+
+    def move_joint(self, x, y, z, rot, speed=10):
+        from ar4link import AR4Error
+        _check_speed(speed)
+        try:
+            return self._conv(self.a.move_joint(x, y, z, *rot, speed_pct=speed))
         except AR4Error as e:
             raise RobotFault(str(e))
 
