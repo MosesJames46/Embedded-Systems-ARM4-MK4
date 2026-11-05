@@ -14,6 +14,28 @@ camera = cv2.VideoCapture(0)
 
 while True:
     success, frame = camera.read()
-    
-    if not sucess:
+
+    if not success:
         break
+
+    # Detect markers and update calibration
+    calibrated = calibration.update(frame)
+
+    if calibrated:
+        cv2.putText(
+            frame,
+            "CALIBRATED",
+            (20, 40),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1,
+            (0, 255, 0),
+            2
+        )
+
+    cv2.imshow("ArUco Calibration", frame)
+
+    if cv2.waitKey(1) & 0xFF == ord("q"):
+        break
+
+camera.release()
+cv2.destroyAllWindows()
