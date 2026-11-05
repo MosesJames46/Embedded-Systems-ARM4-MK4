@@ -13,8 +13,20 @@ webcam -> ColorDetector (HSV colour, 5-frame stability)
        -> vision_move.py safety checks -> robot_backend.py -> Teensy 4.1 (Annin firmware 8.1)
 ```
 
+**Everything runs through `src/main.py`:**
+
+| Command | Step |
+|---|---|
+| `python main.py check` | Find the webcam, confirm all 4 markers are visible |
+| `python main.py vision` | Original vision-only test (was `main.py`, now `vision_test.py`) |
+| `python main.py teach` | Teach the board-to-robot calibration |
+| `python main.py dry` | Full pipeline and safety checks, no motion |
+| `python main.py run` | Live demo |
+
 | File | Purpose |
 |---|---|
+| `src/main.py` | Entry point (above) |
+| `src/vision_test.py` | The team's original vision-only main.py |
 | `src/vision_config.py` | All settings: marker positions, camera index, heights, speed, safety limits |
 | `src/teach_robot.py` | Jog the tool over each marker and save the board-to-robot calibration |
 | `src/vision_move.py` | The demo: live detection, safety checks, hover moves, CSV log |
@@ -55,24 +67,27 @@ unreachable targets, and keeps the hardware E-stop interrupt on pin 39 (the red 
    calibrating, or calibrate again.)
 
 Fallback: if 8.1 misbehaves, flash 6.7.1 again and add `--firmware 6` to every command
-(no software stop on 6.x; use the red E-stop).
+(for example `python main.py run --firmware 6`; there is no software stop on 6.x, so use the red E-stop).
 
 ## 2. Board setup (before every session)
 
-- **Measure** the centre-to-centre distances between the markers and put them in
-  `MARKER_POSITIONS_MM` in `src/vision_config.py`. Marker 4 is the origin; 4→5 is +X and
-  4→7 is +Y, with 6 diagonal from 4. The current values (a 200 mm square) are placeholders
-  from main.py.
+- **Measure** the centre-to-centre distances between the markers: X = marker 4 to 5,
+  Y = marker 4 to 7. In `src/vision_config.py` set
+  `MARKER_POSITIONS_MM = {4: (0, 0), 5: (X, 0), 6: (X, Y), 7: (0, Y)}`.
+  The current 200 mm values are placeholders. (Layout checked: 5 and 7 are next to 4, 6 is diagonal.)
+- Run `python main.py check`. It must say **ALL 4 MARKERS VISIBLE** with the robot in its
+  park pose. If the wrong camera opens, set `CAMERA_INDEX` in `vision_config.py`.
+- Use a **flat** coloured target (paper or card). The camera views the board at an angle, so
+  the top of a tall cube appears shifted away from the camera. Keep `TARGET_HEIGHT_MM` small.
 - Tape the mat to the table. Mount the camera rigidly. If the mat, camera or robot moves,
   re-teach (step 3).
-- Measure the target (cube) height and set `TARGET_HEIGHT_MM`.
 
 ## 3. Teach the board-to-robot calibration (after any setup change)
 
 HMI closed, arm calibrated:
 
 ```bash
-cd src && python teach_robot.py
+cd src && python main.py teach
 ```
 
 Jog with `x+10`, `y-5`, `z-2` etc. until the tool tip is a few mm above the **centre of
@@ -84,7 +99,7 @@ mm mean a wrong marker ID or a wrong measured position.
 ## 4. Dry run (no motion)
 
 ```bash
-python vision_move.py --dry
+python main.py dry
 ```
 
 Drag a box over the cube colour and press ENTER. Check that the board coordinates match a
@@ -94,7 +109,7 @@ appears when all markers are visible and the cube is still and inside the board.
 ## 5. Live demo
 
 ```bash
-python vision_move.py
+python main.py run
 ```
 
 | Key | Action |

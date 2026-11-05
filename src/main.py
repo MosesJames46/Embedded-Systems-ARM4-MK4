@@ -1,77 +1,107 @@
-import cv2
-from ColorPicker import ColorPicker
-from ColorPicker import pygame
-from ColorPicker import pygame_widgets
-from ColorDetector import ColorDetector
-from Camera import Camera
-from ArUcoCalibration import ArUcoCalibration
+"""Milestone 4 entry point: one command for every step.
 
-detector = ColorDetector(ColorPicker(), Camera(3))
+Run from the src folder:
 
-#cv2.namedWindow(detector.window_name)
-#cv2.setMouseCallback(detector.window_name, detector.mouse_callback)
+    python main.py check     1. Find the webcam and confirm all 4 ArUco markers are visible
+    python main.py vision    2. Original vision-only test (colour + board mm, no robot)
+    python main.py teach     3. Teach board-to-robot calibration (jog over markers 4-7)
+    python main.py dry       4. Full pipeline with safety checks, NO robot motion
+    python main.py run       5. Live demo: G = hover over target, SPACE = stop, P = park, Q = quit
 
-# Your existing Camera, ColorPicker, and
-# ColorDetector initialization goes above this.
+Extra options are passed through, e.g.
+    python main.py check --camera 2
+    python main.py run --firmware 6
 
-marker_positions = {
-    4: (0, 0),
-    5: (200, 0),
-    6: (200, 200),
-    7: (0, 200)
-}
+Settings (marker distances, camera index, heights, speed) live in vision_config.py.
+Full procedure: MILESTONE4_RUNBOOK.md in the repo root.
+"""
+import os
+import runpy
+import sys
 
-calibration = ArUcoCalibration(marker_positions)
+import vision_config as cfg
 
-# Select the red cube's color once.
-detector.color_range = detector.calibrate_color()
 
-if detector.color_range is None:
-    raise RuntimeError("Color calibration cancelled")
+def check(argv):
+    """Probe camera indices, then show a live view with detected marker IDs."""
+    import argparse
+    import cv2
 
-try:
+    ap = argparse.ArgumentParser(prog="main.py check")
+    ap.add_argument("--camera", type=int, default=None)
+    args = ap.parse_args(argv)
+
+    if args.camera is None:
+        print("Probing camera indices 0-5 ...")
+        found = []
+        for i in range(6):
+            cap = cv2.VideoCapture(i)
+            ok, frame = cap.read() if cap.isOpened() else (False, None)
+            cap.release()
+            if ok:
+                found.append(i)
+                print(f"  camera {i}: OK ({frame.shape[1]}x{frame.shape[0]})")
+        if not found:
+            raise SystemExit("No working camera found. Is the webcam plugged in?")
+        index = cfg.CAMERA_INDEX if cfg.CAMERA_INDEX in found else found[-1]
+        print(f"Showing camera {index}. If it is the wrong one, run: "
+              f"python main.py check --camera N  (then set CAMERA_INDEX in vision_config.py)")
+    else:
+        index = args.camera
+
+    detector = cv2.aruco.ArucoDetector(
+        cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50),
+        cv2.aruco.DetectorParameters())
+    wanted = set(cfg.MARKER_POSITIONS_MM)
+    cap = cv2.VideoCapture(index)
+    if not cap.isOpened():
+        raise SystemExit(f"Could not open camera {index}")
+    print("Press Q to quit.")
     while True:
-        # Read ONE frame from the existing camera.
-        frame = detector.camera.read()
-
-        if frame is None:
+        ok, frame = cap.read()
+        if not ok:
             print("Camera frame unavailable")
             break
-
-        # Step 1: Find ArUco markers.
-        calibrated = calibration.update(frame)
-
-        # Step 2: Find the cube.
-        display_frame = detector.process_frame(frame)
-
-        # Step 3: Get cube's pixel coordinates.
-        center = detector.get_tracked_center()
-
-        # Step 4: Convert pixels to workspace mm.
-        if (
-            calibrated
-            and center is not None
-            and detector.is_target_stable()
-        ):
-            x_mm, y_mm = calibration.pixel_to_workspace(
-                center
-            )
-
-            cv2.putText(
-                display_frame,
-                f"X: {x_mm:.1f} mm  Y: {y_mm:.1f} mm",
-                (20, 70),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.7,
-                (0, 255, 0),
-                2
-            )
-
-        cv2.imshow("Vision + Calibration", display_frame)
-
+        corners, ids, _ = detector.detectMarkers(frame)
+        seen = set() if ids is None else {int(i) for i in ids.flatten()}
+        if ids is not None:
+            cv2.aruco.drawDetectedMarkers(frame, corners, ids)
+        missing = sorted(wanted - seen)
+        text = "ALL 4 MARKERS VISIBLE" if not missing else f"missing markers: {missing}"
+        colour = (0, 200, 0) if not missing else (0, 0, 255)
+        cv2.putText(frame, f"camera {index}: {text}", (20, 35),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, colour, 2)
+        cv2.imshow("Camera check (Q = quit)", frame)
         if cv2.waitKey(1) & 0xFF == ord("q"):
             break
-
-finally:
-    detector.camera.release()
+    cap.release()
     cv2.destroyAllWindows()
+
+
+def main():
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help", "help"):
+        print(__doc__)
+        return
+    step, rest = sys.argv[1], sys.argv[2:]
+    if step == "check":
+        check(rest)
+    elif step == "vision":
+        sys.argv = ["vision_test.py"] + rest
+        runpy.run_path(os.path.join(os.path.dirname(os.path.abspath(__file__)), "vision_test.py"),
+                       run_name="__main__")
+    elif step == "teach":
+        import teach_robot
+        sys.argv = ["teach_robot.py"] + rest
+        teach_robot.main()
+    elif step in ("dry", "run"):
+        import vision_move
+        sys.argv = ["vision_move.py"] + (["--dry"] if step == "dry" else []) + rest
+        vision_move.main()
+    else:
+        print(f"Unknown step '{step}'.\n")
+        print(__doc__)
+
+
+if __name__ == "__main__":
+    main()

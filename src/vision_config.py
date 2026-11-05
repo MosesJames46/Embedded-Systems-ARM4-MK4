@@ -6,8 +6,10 @@ CALIB_FILE = os.path.join(HERE, "robot_calib.json")
 LOG_FILE = os.path.join(HERE, "vision_moves.csv")
 
 # Measured centres of the ArUco markers on the board, in mm.
-# !!! PLACEHOLDER (200 mm square from main.py). MEASURE the real mat with a tape:
-# marker 4 = origin, 4->5 along +X, 4->7 along +Y, 6 diagonal from 4.
+# !!! PLACEHOLDER (200 mm square from the old main.py). MEASURE the real mat with a tape,
+# centre to centre:  X = distance 4->5,  Y = distance 4->7.  Then set
+#   4: (0, 0),  5: (X, 0),  6: (X, Y),  7: (0, Y)
+# Layout checked from a photo of the mat: 5 and 7 are next to 4, 6 is diagonal from 4.
 MARKER_POSITIONS_MM = {
     4: (0, 0),
     5: (200, 0),
@@ -24,7 +26,9 @@ LOOP_MODE = "000000"
 SPEED_PCT = 10            # move speed, percent (capped at 25 in ar4link)
 
 # Heights relative to the taught board height (mm)
-TARGET_HEIGHT_MM = 25     # height of the cube top above the board - MEASURE IT
+TARGET_HEIGHT_MM = 3      # target height above the board. Use a FLAT target (coloured
+                          # paper/card) - a tall cube reads offset because the camera
+                          # looks at the board at an angle. Raise this if you use a cube.
 HOVER_CLEARANCE_MM = 40   # how far above the cube top the tool stops
 SAFE_Z_MM = 150           # travel height above the board
 
