@@ -7,7 +7,8 @@ Run (HMI closed, robot already calibrated in the HMI):
 Commands (type then Enter):
     x+10  y-5  z+2      jog the tool in the robot base frame (mm)
     p                   print the current pose
-    save 4              store the current tool XY as the centre of marker 4 (also 5, 6, 7)
+    save 0              store the current tool XY as the centre of marker 0 (any ID in
+                        MARKER_POSITIONS_MM in vision_config.py)
     save park           store a parking pose that is OUT of the camera view
     s 5                 set jog speed in percent (1-25, default 10)
     w                   write robot_calib.json and report the fit error

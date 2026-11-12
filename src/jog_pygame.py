@@ -13,8 +13,9 @@ The robot frame: X = away from the base, Y = to the robot's left, Z = up.
     UP / DOWN    step size  1 2 5 10 20 50 mm
     LEFT / RIGHT speed  5 - 25 %
     G            gripper open / close (if the Nano gripper board is connected)
-    4 5 6 7      save the tool position as that ArUco marker (calibration)
-    0            save the park pose
+    0-9          save the tool position as the ArUco marker with that ID
+                 (only IDs listed in MARKER_POSITIONS_MM in vision_config.py)
+    P            save the park pose
     ENTER        write robot_calib.json (same file as `main.py teach`) and show fit errors
     ESC          STOP the current move (firmware 8.1; on 6.x use the red E-stop)
     Q            quit
@@ -116,14 +117,19 @@ def draw(screen, fonts, j, step_mm, speed, grip, saved, fw, fit_lines):
         text(f"floor Z {j.floor_z:.1f} (taught mat height - {FLOOR_MARGIN_MM:.0f})", small, DIM)
     text(j.message, mid, j.msg_colour)
     y += 6
-    names = [str(k) for k in (4, 5, 6, 7) if k in saved] + (["park"] if "park" in saved else [])
+    ids = sorted(cfg.MARKER_POSITIONS_MM)
+    names = [str(k) for k in ids if k in saved] + (["park"] if "park" in saved else [])
+    missing = [str(k) for k in ids if k not in saved]
+    if missing:
+        names.append("(still to teach: " + ", ".join(missing) + ")")
     text(f"saved: {', '.join(names) or 'none'}", small, BLUE)
     for line in fit_lines:
         text(line, small, RED if "WARNING" in line else BLUE)
     y += 8
     for line in ["W/S +X/-X   A/D +Y/-Y   SPACE up   CTRL down   (hold to repeat)",
                  "UP/DOWN step   LEFT/RIGHT speed   G gripper   ESC stop   Q quit",
-                 "4 5 6 7 save marker   0 save park   ENTER write calibration"]:
+                 f"{' '.join(str(k) for k in sorted(cfg.MARKER_POSITIONS_MM))} save marker   "
+                 "P save park   ENTER write calibration"]:
         text(line, small, DIM)
     pygame.display.flip()
 
@@ -201,8 +207,12 @@ def main(argv=None):
                                 j.say(f"Gripper {grip.state}", FG)
                             except Exception as e:
                                 j.say(f"Gripper error: {e}", RED)
-                    elif k in (pygame.K_4, pygame.K_5, pygame.K_6, pygame.K_7, pygame.K_0):
-                        name = "park" if k == pygame.K_0 else int(pygame.key.name(k))
+                    elif (k == pygame.K_p or (pygame.K_0 <= k <= pygame.K_9)):
+                        name = "park" if k == pygame.K_p else k - pygame.K_0
+                        if name != "park" and name not in cfg.MARKER_POSITIONS_MM:
+                            j.say(f"Marker {name} is not in MARKER_POSITIONS_MM "
+                                  f"{sorted(cfg.MARKER_POSITIONS_MM)}", AMBER)
+                            continue
                         try:
                             saved[name] = arm.pose()
                             j.pose = saved[name]
@@ -212,7 +222,7 @@ def main(argv=None):
                             j.say(f"Could not read pose: {e}", RED)
                     elif k in (pygame.K_RETURN, pygame.K_KP_ENTER):
                         if "park" not in saved:
-                            j.say("Save a park pose first (key 0), out of the camera view", AMBER)
+                            j.say("Save a park pose first (key P), out of the camera view", AMBER)
                             continue
                         try:
                             ids, err = teach.write_calib(saved, fw)

@@ -4,7 +4,7 @@ Run from the src folder:
 
     python main.py check     1. Find the webcam and confirm all 4 ArUco markers are visible
     python main.py vision    2. Original vision-only test (colour + board mm, no robot)
-    python main.py teach     3. Teach board-to-robot calibration (jog over markers 4-7)
+    python main.py teach     3. Teach board-to-robot calibration (jog over the 4 markers)
     python main.py dry       4. Full pipeline with safety checks, NO robot motion
     python main.py run       5. Live demo: G = hover over target, SPACE = stop, P = park, Q = quit
                                 In the video window: C new target, M multi-target mode (1-9 / click

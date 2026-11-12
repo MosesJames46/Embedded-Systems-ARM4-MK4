@@ -172,7 +172,7 @@ A pygame window that replaces typing `x+10` in teach. Click the window so it has
 | UP / DOWN | Step size 1, 2, 5, 10, 20, 50 mm (hold a key to repeat steps) |
 | LEFT / RIGHT | Speed 5-25 % |
 | G | Gripper open / close (Annin servo gripper on the Nano board) |
-| 4 5 6 7 / 0 | Save the tool position as that marker / as park |
+| 0-9 / P | Save the tool position as the marker with that ID (IDs in `MARKER_POSITIONS_MM`) / as park |
 | ENTER | Write `robot_calib.json` (same file as teach) and show fit errors |
 | ESC | Stop the move (8.1 only; on 6.x use the red E-stop) |
 | Q | Quit |

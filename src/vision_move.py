@@ -1,7 +1,7 @@
 """Milestone 4: camera-guided AR4 positioning above a coloured target.
 
 Pipeline: webcam -> colour detection (ColorDetector) -> pixel to board mm
-(ArUco markers 4-7) -> board mm to robot mm (robot_calib.json from teach_robot.py)
+(the 4 ArUco markers in vision_config.py) -> board mm to robot mm (robot_calib.json from teach_robot.py)
 -> safe approach, hover, retreat, park.
 
 Run:
