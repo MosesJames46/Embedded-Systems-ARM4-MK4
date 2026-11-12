@@ -16,6 +16,9 @@ The robot frame: X = away from the base, Y = to the robot's left, Z = up.
     0-9          save the tool position as the ArUco marker with that ID
                  (only IDs listed in MARKER_POSITIONS_MM in vision_config.py)
     P            save the park pose
+    B            save the next chessboard corner square (a1 -> h1 -> h8 -> a8);
+                 after the 4th, chess_board.json is written with all 64 squares
+    N            start the corner sequence again
     ENTER        write robot_calib.json (same file as `main.py teach`) and show fit errors
     ESC          STOP the current move (firmware 8.1; on 6.x use the red E-stop)
     Q            quit
@@ -33,6 +36,7 @@ import time
 import pygame
 
 import teach_robot as teach
+import chess_board as cb
 import vision_config as cfg
 from robot_backend import connect, RobotFault, MAX_SPEED
 
@@ -92,7 +96,7 @@ class Jogger:
         self.say(f"Moved to X {x:.1f}  Y {y:.1f}  Z {z:.1f}", FG)
 
 
-def draw(screen, fonts, j, step_mm, speed, grip, saved, fw, fit_lines):
+def draw(screen, fonts, j, step_mm, speed, grip, saved, fw, fit_lines, corners, board_lines):
     big, mid, small = fonts
     screen.fill(BG)
     p = j.pose
@@ -125,11 +129,17 @@ def draw(screen, fonts, j, step_mm, speed, grip, saved, fw, fit_lines):
     text(f"saved: {', '.join(names) or 'none'}", small, BLUE)
     for line in fit_lines:
         text(line, small, AMBER if "Large difference" in line else BLUE)
+    done = [c for c in cb.CORNERS if c in corners]
+    nxt = next((c for c in cb.CORNERS if c not in corners), None)
+    text("board corners: " + (", ".join(done) or "none") +
+         (f"   next: {nxt} (press B over its centre)" if nxt else "   - all taught"), small, BLUE)
+    for line in board_lines:
+        text(line, small, AMBER if line.startswith("!") else BLUE)
     y += 8
     for line in ["W/S +X/-X   A/D +Y/-Y   SPACE up   CTRL down   (hold to repeat)",
                  "UP/DOWN step   LEFT/RIGHT speed   G gripper   ESC stop   Q quit",
                  f"{' '.join(str(k) for k in sorted(cfg.MARKER_POSITIONS_MM))} save marker   "
-                 "P save park   ENTER write calibration"]:
+                 "P save park   ENTER write calibration   B board corner   N restart corners"]:
         text(line, small, DIM)
     pygame.display.flip()
 
@@ -153,6 +163,7 @@ def main(argv=None):
     j = Jogger(arm, floor_z)
     saved = teach.load_saved()
     fit_lines = []
+    corners, board_lines = {}, []
 
     grip, grip_state = None, "not connected"
     if not args.no_gripper:
@@ -165,7 +176,7 @@ def main(argv=None):
 
     pygame.display.init()   # no pygame.init(): skips audio (avoids ALSA errors)
     pygame.font.init()
-    screen = pygame.display.set_mode((900, 330))
+    screen = pygame.display.set_mode((900, 430))
     pygame.display.set_caption("AR4 jog - click here so the keys go to this window")
     fonts = (pygame.font.SysFont("monospace", 30, bold=True),
              pygame.font.SysFont("monospace", 20),
@@ -220,6 +231,27 @@ def main(argv=None):
                                   f"Z {j.pose['z']:.1f}", GREEN)
                         except RobotFault as e:
                             j.say(f"Could not read pose: {e}", RED)
+                    elif k == pygame.K_n:
+                        corners, board_lines = {}, []
+                        j.say("Corner sequence restarted: go to a1 and press B", FG)
+                    elif k == pygame.K_b:
+                        nxt = next((c for c in cb.CORNERS if c not in corners), None)
+                        if nxt is None:
+                            j.say("All 4 corners taught - press N to start again", AMBER)
+                            continue
+                        try:
+                            corners[nxt] = arm.pose()
+                        except RobotFault as e:
+                            j.say(f"Could not read pose: {e}", RED)
+                            continue
+                        j.pose = corners[nxt]
+                        j.say(f"Saved corner {nxt} at X {j.pose['x']:.1f} Y {j.pose['y']:.1f}", GREEN)
+                        if len(corners) == 4:
+                            board = cb.ChessBoard(corners)
+                            lines, warn = board.save(fw)
+                            board_lines = lines + ["! " + w for w in warn]
+                            j.say("Wrote chess_board.json (64 squares)" +
+                                  (" - check the warnings" if warn else ""), AMBER if warn else GREEN)
                     elif k in (pygame.K_RETURN, pygame.K_KP_ENTER):
                         if "park" not in saved:
                             j.say("Save a park pose first (key P), out of the camera view", AMBER)
@@ -234,7 +266,8 @@ def main(argv=None):
                 dx, dy, dz = jog_vector(pygame.key.get_pressed())
                 if dx or dy or dz:
                     j.start(j.step, dx, dy, dz, STEPS[step_i], speed)
-            draw(screen, fonts, j, STEPS[step_i], speed, grip_state, saved, fw, fit_lines)
+            draw(screen, fonts, j, STEPS[step_i], speed, grip_state, saved, fw, fit_lines,
+                 corners, board_lines)
             clock.tick(30)
     finally:
         if j.busy():

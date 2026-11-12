@@ -11,7 +11,9 @@ Run from the src folder:
                                 to select, A = visit all), + / - hover clearance, ] / [ target height
     python main.py park         Move the arm straight up, then to the saved park pose
     python main.py jog          Keyboard jog window (WASD = X/Y, SPACE/CTRL = up/down);
-                                can also save the marker/park calibration points
+                                saves marker/park points and the 4 board corners (key B)
+    python main.py board        Type a square (e4): the arm hovers over it
+    python main.py boardview    Camera view with the 64 squares drawn; click = which square
 
 Extra options are passed through, e.g.
     python main.py check --camera 2
@@ -126,6 +128,12 @@ def main():
         check(rest)
     elif step == "park":
         park(rest)
+    elif step == "board":
+        import board_tool
+        board_tool.visit(rest)
+    elif step == "boardview":
+        import board_tool
+        board_tool.view(rest)
     elif step == "jog":
         import jog_pygame
         jog_pygame.main(rest)
