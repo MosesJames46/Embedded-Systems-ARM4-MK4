@@ -11,6 +11,8 @@ The robot frame: X = away from the base, Y = to the robot's left, Z = up.
     SPACE        +Z  (up)
     CTRL         -Z  (down)
     UP / DOWN    step size  1 2 5 10 20 50 mm
+    R            re-lock the gripper orientation to the current pose (it is locked
+                 when the window opens, so jogging never rotates the gripper)
     LEFT / RIGHT speed  5 - 25 %
     G            gripper open / close (if the Nano gripper board is connected)
     0-9          save the tool position as the ArUco marker with that ID
@@ -60,6 +62,10 @@ class Jogger:
         self.arm = arm
         self.floor_z = floor_z
         self.pose = arm.pose()
+        # Orientation is captured ONCE and sent unchanged with every jog. Re-sending the
+        # read-back orientation lets small reporting/rounding errors accumulate, so the
+        # gripper slowly rotates and never comes back.
+        self.hold_rot = list(self.pose["rot"])
         self.worker = None
         self.message = "Ready"
         self.msg_colour = GREEN
@@ -92,7 +98,7 @@ class Jogger:
         if self.floor_z is not None and z < self.floor_z:
             self.say(f"Refused: Z {z:.1f} is below the mat floor ({self.floor_z:.1f})", RED)
             return
-        self.pose = self.arm.move_linear(x, y, z, p["rot"], speed)
+        self.pose = self.arm.move_linear(x, y, z, self.hold_rot, speed)
         self.say(f"Moved to X {x:.1f}  Y {y:.1f}  Z {z:.1f}", FG)
 
 
@@ -110,6 +116,10 @@ def draw(screen, fonts, j, step_mm, speed, grip, saved, fw, fit_lines, corners, 
     text(f"AR4 jog  (firmware {fw})", mid, DIM)
     text(f"X {p['x']:7.1f}   Y {p['y']:7.1f}   Z {p['z']:7.1f}  mm", big, FG)
     j5 = p["joints"][4]
+    hr = j.hold_rot
+    text(f"orientation locked at {hr[0]:.1f} {hr[1]:.1f} {hr[2]:.1f}   "
+         f"(robot reports {p['rot'][0]:.1f} {p['rot'][1]:.1f} {p['rot'][2]:.1f})   R = re-lock",
+         small, DIM)
     text("J " + "  ".join(f"{a:6.1f}" for a in p["joints"]), small, DIM)
     if abs(j5) < 5:
         text("J5 near 0: wrist singularity zone - the wrist may flip (8.1 fixes this)", small, AMBER)
@@ -137,7 +147,7 @@ def draw(screen, fonts, j, step_mm, speed, grip, saved, fw, fit_lines, corners, 
         text(line, small, AMBER if line.startswith("!") else BLUE)
     y += 8
     for line in ["W/S +X/-X   A/D +Y/-Y   SPACE up   CTRL down   (hold to repeat)",
-                 "UP/DOWN step   LEFT/RIGHT speed   G gripper   ESC stop   Q quit",
+                 "UP/DOWN step   LEFT/RIGHT speed   G gripper   R re-lock orientation   ESC stop   Q quit",
                  f"{' '.join(str(k) for k in sorted(cfg.MARKER_POSITIONS_MM))} save marker   "
                  "P save park   ENTER write calibration   B board corner   N restart corners"]:
         text(line, small, DIM)
@@ -226,9 +236,17 @@ def main(argv=None):
                             continue
                         try:
                             saved[name] = arm.pose()
+                            saved[name]["rot"] = list(j.hold_rot)
                             j.pose = saved[name]
                             j.say(f"Saved {name} at X {j.pose['x']:.1f} Y {j.pose['y']:.1f} "
                                   f"Z {j.pose['z']:.1f}", GREEN)
+                        except RobotFault as e:
+                            j.say(f"Could not read pose: {e}", RED)
+                    elif k == pygame.K_r:
+                        try:
+                            j.pose = arm.pose()
+                            j.hold_rot = list(j.pose["rot"])
+                            j.say("Orientation re-locked to the current pose", GREEN)
                         except RobotFault as e:
                             j.say(f"Could not read pose: {e}", RED)
                     elif k == pygame.K_n:
@@ -241,6 +259,7 @@ def main(argv=None):
                             continue
                         try:
                             corners[nxt] = arm.pose()
+                            corners[nxt]["rot"] = list(j.hold_rot)
                         except RobotFault as e:
                             j.say(f"Could not read pose: {e}", RED)
                             continue

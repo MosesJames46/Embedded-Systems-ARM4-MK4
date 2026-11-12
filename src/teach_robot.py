@@ -104,6 +104,9 @@ def main():
         print(f"Loaded existing taught points: {list(saved)}")
     print(__doc__)
     print("Current:", fmt(arm.pose()))
+    hold_rot = list(arm.pose()["rot"])   # locked: re-sending read-back rot makes it drift
+    print("Orientation locked at", " ".join(f"{a:.1f}" for a in hold_rot),
+          "(type 'lock' to re-lock to the current pose)")
 
     while True:
         try:
@@ -115,6 +118,9 @@ def main():
         try:
             if line == "q":
                 break
+            elif line == "lock":
+                hold_rot = list(arm.pose()["rot"])
+                print("Orientation re-locked at", " ".join(f"{a:.1f}" for a in hold_rot))
             elif line == "p":
                 print(fmt(arm.pose()))
             elif line.startswith("s "):
@@ -133,7 +139,7 @@ def main():
                     y += d
                 else:
                     z += d
-                print(fmt(arm.move_linear(x, y, z, p["rot"], speed=speed)))
+                print(fmt(arm.move_linear(x, y, z, hold_rot, speed=speed)))
             elif line.startswith("save "):
                 name = line.split()[1]
                 key = int(name) if name.isdigit() else name
@@ -141,6 +147,7 @@ def main():
                     print(f"Unknown name. Use one of {list(MARKER_POSITIONS_MM)} or park")
                     continue
                 saved[key] = arm.pose()
+                saved[key]["rot"] = list(hold_rot)
                 print(f"Saved {key}: {saved[key]['x']:.1f}, {saved[key]['y']:.1f}, "
                       f"{saved[key]['z']:.1f}")
             elif line == "w":
