@@ -124,7 +124,7 @@ def draw(screen, fonts, j, step_mm, speed, grip, saved, fw, fit_lines):
         names.append("(still to teach: " + ", ".join(missing) + ")")
     text(f"saved: {', '.join(names) or 'none'}", small, BLUE)
     for line in fit_lines:
-        text(line, small, RED if "WARNING" in line else BLUE)
+        text(line, small, AMBER if "Large difference" in line else BLUE)
     y += 8
     for line in ["W/S +X/-X   A/D +Y/-Y   SPACE up   CTRL down   (hold to repeat)",
                  "UP/DOWN step   LEFT/RIGHT speed   G gripper   ESC stop   Q quit",

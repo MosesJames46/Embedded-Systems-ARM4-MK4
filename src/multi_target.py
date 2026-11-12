@@ -64,7 +64,7 @@ class MultiTracker:
     def __init__(self, samples, spread_mm, limits):
         self.samples = samples
         self.spread_mm = spread_mm
-        self.limits = limits  # (x0, x1, y0, y1) in board mm
+        self.limits = limits  # inside(x, y) -> bool, or (x0, x1, y0, y1)
         self.tracks = []
 
     def clear(self):
@@ -103,9 +103,13 @@ class MultiTracker:
         spread = float(np.max(np.linalg.norm(pts - np.median(pts, axis=0), axis=1)))
         if spread > self.spread_mm:
             return False, "moving"
-        x0, x1, y0, y1 = self.limits
         bx, by = t.board
-        if not (x0 <= bx <= x1 and y0 <= by <= y1):
+        if callable(self.limits):
+            on_board = self.limits(bx, by)
+        else:
+            x0, x1, y0, y1 = self.limits
+            on_board = x0 <= bx <= x1 and y0 <= by <= y1
+        if not on_board:
             return False, "off board"
         others = [o.area for o in self.tracks if o is not t and not o.missed]
         if others and t.area > MERGE_RATIO * float(np.median(others)):

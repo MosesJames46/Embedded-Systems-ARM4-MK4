@@ -82,10 +82,11 @@ def write_calib(saved, firmware):
 
 
 def calib_report(ids, err):
-    lines = [f"marker {i}: fit error {e:.2f} mm" for i, e in zip(ids, err)]
+    lines = [f"marker {i}: {e:.2f} mm from your tape measurements" for i, e in zip(ids, err)]
     if max(err) > 15:
-        lines.append("WARNING: >15 mm error - check marker IDs, MARKER_POSITIONS_MM, "
-                     "and that the tool was centred. Re-teach before the demo.")
+        lines.append("Large difference: if MARKER_POSITIONS_MM holds real tape measurements, "
+                     "check marker IDs and centring. If you did not measure, ignore this - "
+                     "with all markers taught, the taught positions are used directly.")
     if len(ids) == 3:
         lines.append("(3 points fit exactly - teach the 4th marker to get a real error check)")
     return lines

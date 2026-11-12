@@ -86,6 +86,18 @@ Fallback: if 8.1 misbehaves, flash 6.7.1 again and add `--firmware 6` to every c
 
 ## 3. Teach the board-to-robot calibration (after any setup change)
 
+**No tape measurements needed when all 4 markers are taught.** Their jogged robot X/Y
+are used directly: the camera maps pixels straight to robot mm (`src/workspace.py`).
+`MARKER_POSITIONS_MM` then only has to list the right marker IDs; real measured values
+add an independent cross-check ("mm from your tape measurements"). Without measuring,
+verify instead in the dry run: put a target down, note the robot X/Y on screen, jog the
+gripper over the target and compare with the jog window's X/Y.
+The park pose is only the resting position; robot coordinates are fixed to the base
+by the HMI calibration, so no reference point is needed.
+
+The easiest way to teach is the jog window (`python main.py jog`): press the marker's ID
+number over its centre, P for park, ENTER to write. The typed `teach` below also works.
+
 HMI closed, arm calibrated:
 
 ```bash

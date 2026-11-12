@@ -40,6 +40,7 @@ from ArUcoCalibration import ArUcoCalibration
 import vision_config as cfg
 from robot_backend import connect, RobotFault
 import multi_target as mt
+import workspace as ws
 
 GREEN, RED, YELLOW = (0, 200, 0), (0, 0, 255), (0, 200, 255)
 
@@ -108,7 +109,14 @@ def load_calib():
         return None
     with open(cfg.CALIB_FILE) as f:
         c = json.load(f)
-    c["M"] = np.array(c["affine_board_to_robot"], dtype=np.float64)
+    plane = ws.taught_plane(c, cfg.MARKER_POSITIONS_MM)
+    if plane is not None:
+        # All markers taught: camera maps straight to robot mm, so board == robot frame.
+        c["plane"] = plane
+        c["M"] = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+    else:
+        c["plane"] = None
+        c["M"] = np.array(c["affine_board_to_robot"], dtype=np.float64)
     return c
 
 
@@ -117,14 +125,7 @@ def board_to_robot(calib, x, y):
     return float(rx), float(ry)
 
 
-def board_limits():
-    xs = [p[0] for p in cfg.MARKER_POSITIONS_MM.values()]
-    ys = [p[1] for p in cfg.MARKER_POSITIONS_MM.values()]
-    m = cfg.BOARD_MARGIN_MM
-    return min(xs) + m, max(xs) - m, min(ys) + m, max(ys) - m
-
-
-def check_target(history, calibrated, detector_stable):
+def check_target(history, calibrated, detector_stable, inside):
     """Return (ok, reason, (x, y)) using the median of recent readings."""
     if not calibrated:
         return False, "markers not all visible", None
@@ -137,8 +138,7 @@ def check_target(history, calibrated, detector_stable):
     spread = float(np.max(np.linalg.norm(pts - med, axis=1)))
     if spread > cfg.STABLE_SPREAD_MM:
         return False, f"target jittering ({spread:.1f} mm)", tuple(med)
-    x0, x1, y0, y1 = board_limits()
-    if not (x0 <= med[0] <= x1 and y0 <= med[1] <= y1):
+    if not inside(*med):
         return False, "target outside board limits", tuple(med)
     return True, "READY - press G", tuple(med)
 
@@ -255,7 +255,17 @@ def main():
     # ColorDetector stores its ColorPicker but never uses it; passing None avoids the
     # frozen pygame window ("not responding" popup).
     detector = ColorDetector(None, Camera(args.camera))
-    aruco = ArUcoCalibration(cfg.MARKER_POSITIONS_MM)
+    plane = calib["plane"] if calib is not None else None
+    if plane is not None:
+        print("Using the taught marker positions: camera pixels map straight to robot mm "
+              "(no tape measurements needed).")
+    else:
+        plane = cfg.MARKER_POSITIONS_MM
+        print("Using measured MARKER_POSITIONS_MM from vision_config.py"
+              + (" with the board-to-robot fit." if calib is not None else "."))
+    aruco = ArUcoCalibration(plane)
+    inside = ws.make_inside(plane.values(), cfg.BOARD_MARGIN_MM)
+    robot_frame = calib is not None and calib["plane"] is not None
     print("Drag a box over the target colour, then press ENTER.")
     detector.color_range = detector.calibrate_color()
     cv2.destroyAllWindows()
@@ -279,7 +289,7 @@ def main():
         worker.start()
     window = "Vision-guided AR4 (G=go P=park Q=quit)"
     multi = False
-    tracker = mt.MultiTracker(cfg.STABLE_SAMPLES, cfg.STABLE_SPREAD_MM, board_limits())
+    tracker = mt.MultiTracker(cfg.STABLE_SAMPLES, cfg.STABLE_SPREAD_MM, inside)
     selected_id = None
     clicks = []
     cv2.namedWindow(window)
@@ -327,7 +337,7 @@ def main():
                     history.append(aruco.pixel_to_workspace(center))
                 else:
                     history.clear()
-                ok, reason, med = check_target(history, calibrated, stable)
+                ok, reason, med = check_target(history, calibrated, stable, inside)
 
             lines = [(f"markers: {sorted(aruco.visible_ids)}", GREEN if calibrated else RED)]
             if multi:
@@ -335,7 +345,9 @@ def main():
                 lines.append((f"MULTI: {len(tracker.numbered())} seen, {len(ready)} ready, "
                               f"selected {'#' + str(sel_num) if sel_num else 'none'}  (M = single)",
                               YELLOW))
-            if med is not None:
+            if med is not None and robot_frame:
+                lines.append((f"robot X {med[0]:.1f}  Y {med[1]:.1f} mm", YELLOW))
+            elif med is not None:
                 lines.append((f"board X {med[0]:.1f}  Y {med[1]:.1f} mm", YELLOW))
                 if calib is not None:
                     rx, ry = board_to_robot(calib, *med)
