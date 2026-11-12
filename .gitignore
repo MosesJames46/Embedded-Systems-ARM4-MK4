@@ -15,4 +15,6 @@ __pycache__/
 
 #OS-generate files
 .DS_Store
-Thumbs.dbsrc/Embedded-Systems-ARM4-MK4/
+Thumbs.db
+src/Embedded-Systems-ARM4-MK4/
+src/dataset/

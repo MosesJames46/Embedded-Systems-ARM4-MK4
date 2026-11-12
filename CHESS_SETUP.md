@@ -95,10 +95,40 @@ git add src/robot_calib.json src/chess_board.json src/vision_config.py
 git commit -m "Board calibration" && git push
 ```
 
+## D. Piece recognition (classifier, no tags)
+
+The camera crops every square (plus the space above it, where a standing piece appears)
+and a classifier trained on **your** pieces, board, camera angle and lighting labels it:
+empty, or one of the 12 pieces. Labelling is automatic: you set up a position the
+program already knows and every square is saved with its correct label.
+
+8. Install the new dependencies once: `pip install -r ../requirements-linux.txt`
+9. **Capture training data** (`python main.py capture`), in the lighting you will demo in:
+   - `S` (starting position), set the real board to match, then `B` (burst of 5 frames). Repeat 2 times,
+     shifting a lamp or blind between bursts.
+   - `N` (random placement): the terminal prints where all 32 pieces go. Set them up exactly,
+     then `B`. **Do 15-20 different placements.** This is what teaches every piece on
+     light and dark squares, near and far from the camera.
+   - The more placements, the better: in testing, accuracy rose from 78% to 94% when the
+     data went from 13 to 36 positions.
+10. **Train**: `python main.py train` (about a minute). It prints accuracy on frames it never
+    saw, plus a confusion matrix showing which pieces it mixes up. Capture more
+    placements if a piece type scores low, then retrain.
+11. **Check live**: `python main.py recognize`. Every square is labelled, and red `?` marks
+    a square below 60% confidence. `C` compares with the starting position and lists
+    mismatches. `SPACE` prints the board and its FEN.
+
+**How errors are handled in the game:** the chess program always knows what the board
+*should* be. A human move is accepted only if it is a **legal** move that matches what the
+camera sees; otherwise the system stops and asks for correction. Empty vs occupied was
+100% in testing, so recognition mistakes show up as a mismatch, never as a silent wrong
+move.
+
+`dataset/` (thousands of crop images) stays on the laptop and is not committed. Commit
+`src/piece_model.joblib` (the trained model) instead.
+
 ## Next phases
 
-2. **Piece identification**: an ArUco tag (IDs 10 and up) on each piece top encodes type
-   and colour; the camera assigns each tag to a square.
 3. **Chess program**: python-chess for rules, turns and special moves; Stockfish selects moves.
 4. **Pick and place**: grasp and release heights per piece, captures to a drop zone, and
    board verification after every move.

@@ -14,6 +14,9 @@ Run from the src folder:
                                 saves marker/park points and the 4 board corners (key B)
     python main.py jointtest    Motor check, one joint at a time: direction, amount, return
     python main.py warmup       Pre-session self-test: axis moves, repeatability, wrist, gripper
+    python main.py capture      Classifier data: set known positions, every square auto-labelled
+    python main.py train        Train the piece classifier (accuracy + confusion matrix)
+    python main.py recognize    Live: every square labelled with piece type, colour, confidence
     python main.py board        Type a square (e4): the arm hovers over it
     python main.py boardview    Camera view with the 64 squares drawn; click = which square
 
@@ -136,6 +139,9 @@ def main():
     elif step == "warmup":
         import warmup
         warmup.run(rest)
+    elif step in ("capture", "train", "recognize"):
+        import piece_tools
+        getattr(piece_tools, step)(rest)
     elif step == "board":
         import board_tool
         board_tool.visit(rest)
