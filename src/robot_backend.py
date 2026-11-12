@@ -116,6 +116,16 @@ class V8Robot:
             raise RobotFault("Stopped by operator")
         return self._parse(final)
 
+    def move_joints(self, angles, speed=10):
+        """Move to absolute joint angles J1..J6 (deg)."""
+        _check_speed(speed)
+        if self.stopped:
+            raise RobotFault("Stopped by operator")
+        reply = self.r.command({"cmd": "move_joints", "j": list(angles)[:6] + [0, 0, 0],
+                                "spd_type": "percent", "spd": speed, "acc": 10, "dec": 10},
+                               timeout=120)
+        return self._parse(reply)
+
     def move_joint(self, x, y, z, rot, speed=10):
         """Joint-interpolated move (path not straight). Used for parking."""
         _check_speed(speed)
@@ -167,6 +177,14 @@ class LegacyRobot:
         _check_speed(speed)
         try:
             return self._conv(self.a.move_linear(x, y, z, *rot, speed_pct=speed))
+        except AR4Error as e:
+            raise RobotFault(str(e))
+
+    def move_joints(self, angles, speed=10):
+        from ar4link import AR4Error
+        _check_speed(speed)
+        try:
+            return self._conv(self.a.move_joints(angles, speed_pct=speed))
         except AR4Error as e:
             raise RobotFault(str(e))
 

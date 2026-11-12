@@ -12,6 +12,8 @@ Run from the src folder:
     python main.py park         Move the arm straight up, then to the saved park pose
     python main.py jog          Keyboard jog window (WASD = X/Y, SPACE/CTRL = up/down);
                                 saves marker/park points and the 4 board corners (key B)
+    python main.py jointtest    Motor check, one joint at a time: direction, amount, return
+    python main.py warmup       Pre-session self-test: axis moves, repeatability, wrist, gripper
     python main.py board        Type a square (e4): the arm hovers over it
     python main.py boardview    Camera view with the 64 squares drawn; click = which square
 
@@ -128,6 +130,12 @@ def main():
         check(rest)
     elif step == "park":
         park(rest)
+    elif step == "jointtest":
+        import jointtest
+        jointtest.run(rest)
+    elif step == "warmup":
+        import warmup
+        warmup.run(rest)
     elif step == "board":
         import board_tool
         board_tool.visit(rest)

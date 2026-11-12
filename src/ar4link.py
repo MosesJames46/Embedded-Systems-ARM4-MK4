@@ -127,6 +127,19 @@ class AR4:
                            "out of reach or outside joint limits")
         return Pose(reply)
 
+    def move_joints(self, angles, speed_pct=10):
+        """Move to absolute joint angles J1..J6 (deg) with the RJ command."""
+        if not 1 <= speed_pct <= self.MAX_SPEED:
+            raise ValueError(f"speed_pct must be 1-{self.MAX_SPEED}")
+        wrist = "F" if angles[4] > 0 else "N"
+        cmd = ("RJ" + "".join(f"{L}{a:.3f}" for L, a in zip("ABCDEF", angles))
+               + f"J70.00J80.00J90.00Sp{speed_pct:.0f}Ac10Dc10Rm80W{wrist}Lm{self.loop_mode}")
+        travel = max(abs(a - b) for a, b in zip(angles, self.pose().joints))
+        reply = self._cmd(cmd, timeout=20 + 3 * travel / speed_pct)
+        if not reply.startswith("A"):
+            raise AR4Error(f"Joint move refused or faulted ({reply}) - outside joint limits?")
+        return Pose(reply)
+
     def move_linear(self, x, y, z, rz, ry, rx, speed_pct=10):
         dist = sum((a - b) ** 2 for a, b in zip((x, y, z), self.pose().xyz)) ** 0.5
         return self._move("ML", x, y, z, rz, ry, rx, speed_pct,
