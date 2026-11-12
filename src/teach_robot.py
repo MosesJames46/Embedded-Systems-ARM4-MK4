@@ -53,6 +53,43 @@ def fmt(p):
             f"  | J " + " ".join(f"{a:.1f}" for a in p["joints"]))
 
 
+def load_saved():
+    """Taught points from an existing robot_calib.json (empty dict if none)."""
+    if not os.path.exists(CALIB_FILE):
+        return {}
+    with open(CALIB_FILE) as f:
+        old = json.load(f)
+    return {int(k) if k.isdigit() else k: v for k, v in old.get("taught", {}).items()}
+
+
+def write_calib(saved, firmware):
+    """Fit board->robot from the saved marker poses and write robot_calib.json."""
+    ids, M, err = fit(saved)
+    first = saved[ids[0]]
+    data = {
+        "affine_board_to_robot": M.tolist(),
+        "board_z": float(np.mean([saved[i]["z"] for i in ids])),
+        "tool_rot": first["rot"],
+        "firmware": firmware,
+        "markers_used": ids,
+        "fit_error_mm": {str(i): float(e) for i, e in zip(ids, err)},
+        "taught": {str(k): v for k, v in saved.items()},
+    }
+    with open(CALIB_FILE, "w") as f:
+        json.dump(data, f, indent=2)
+    return ids, err
+
+
+def calib_report(ids, err):
+    lines = [f"marker {i}: fit error {e:.2f} mm" for i, e in zip(ids, err)]
+    if max(err) > 15:
+        lines.append("WARNING: >15 mm error - check marker IDs, MARKER_POSITIONS_MM, "
+                     "and that the tool was centred. Re-teach before the demo.")
+    if len(ids) == 3:
+        lines.append("(3 points fit exactly - teach the 4th marker to get a real error check)")
+    return lines
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", default=None)
@@ -60,11 +97,8 @@ def main():
     args = ap.parse_args()
     arm = connect(args.firmware, args.port, LOOP_MODE)
     speed = 10
-    saved = {}
-    if os.path.exists(CALIB_FILE):
-        with open(CALIB_FILE) as f:
-            old = json.load(f)
-        saved = {int(k) if k.isdigit() else k: v for k, v in old.get("taught", {}).items()}
+    saved = load_saved()
+    if saved:
         print(f"Loaded existing taught points: {list(saved)}")
     print(__doc__)
     print("Current:", fmt(arm.pose()))
@@ -111,27 +145,10 @@ def main():
                 if "park" not in saved:
                     print("Save a park pose first (out of camera view): save park")
                     continue
-                ids, M, err = fit(saved)
-                first = saved[ids[0]]
-                data = {
-                    "affine_board_to_robot": M.tolist(),
-                    "board_z": float(np.mean([saved[i]["z"] for i in ids])),
-                    "tool_rot": first["rot"],
-                    "firmware": args.firmware,
-                    "markers_used": ids,
-                    "fit_error_mm": {str(i): float(e) for i, e in zip(ids, err)},
-                    "taught": {str(k): v for k, v in saved.items()},
-                }
-                with open(CALIB_FILE, "w") as f:
-                    json.dump(data, f, indent=2)
+                ids, err = write_calib(saved, args.firmware)
                 print(f"Wrote {CALIB_FILE}")
-                for i, e in zip(ids, err):
-                    print(f"  marker {i}: fit error {e:.2f} mm")
-                if max(err) > 15:
-                    print("  WARNING: >15 mm error - check marker IDs, MARKER_POSITIONS_MM, "
-                          "and that the tool was centred. Re-teach before the demo.")
-                if len(ids) == 3:
-                    print("  (3 points fit exactly - teach the 4th marker to get a real error check)")
+                for line_ in calib_report(ids, err):
+                    print(" ", line_)
             else:
                 print("Unknown command")
         except (RobotFault, ValueError, IndexError) as e:

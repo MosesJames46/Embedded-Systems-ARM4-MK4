@@ -10,6 +10,8 @@ Run from the src folder:
                                 In the video window: C new target, M multi-target mode (1-9 / click
                                 to select, A = visit all), + / - hover clearance, ] / [ target height
     python main.py park         Move the arm straight up, then to the saved park pose
+    python main.py jog          Keyboard jog window (WASD = X/Y, SPACE/CTRL = up/down);
+                                can also save the marker/park calibration points
 
 Extra options are passed through, e.g.
     python main.py check --camera 2
@@ -124,6 +126,9 @@ def main():
         check(rest)
     elif step == "park":
         park(rest)
+    elif step == "jog":
+        import jog_pygame
+        jog_pygame.main(rest)
     elif step == "vision":
         sys.argv = ["vision_test.py"] + rest
         runpy.run_path(os.path.join(os.path.dirname(os.path.abspath(__file__)), "vision_test.py"),

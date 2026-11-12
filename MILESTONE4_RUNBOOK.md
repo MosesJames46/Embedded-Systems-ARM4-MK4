@@ -23,6 +23,7 @@ webcam -> ColorDetector (HSV colour, 5-frame stability)
 | `python main.py dry` | Full pipeline and safety checks, no motion |
 | `python main.py run` | Live demo |
 | `python main.py park` | Move the arm up and to the saved park pose |
+| `python main.py jog` | Keyboard jog window (also saves calibration points) |
 
 | File | Purpose |
 |---|---|
@@ -158,6 +159,30 @@ blob much larger than the others, likely two touching objects, which is refused)
 one object is ready it is selected automatically. **A** captures all ready positions
 before the arm moves (the arm blocks the camera during motion), visits them in number order,
 and parks. SPACE (firmware 8.1) or the E-stop aborts the whole sequence.
+
+## Keyboard jog (`python main.py jog`)
+
+A pygame window that replaces typing `x+10` in teach. Click the window so it has the keys.
+
+| Key | Action |
+|---|---|
+| W / S | +X / -X (away from / toward the base) |
+| A / D | +Y / -Y (robot's left / right) |
+| SPACE / CTRL | Up / down |
+| UP / DOWN | Step size 1, 2, 5, 10, 20, 50 mm (hold a key to repeat steps) |
+| LEFT / RIGHT | Speed 5-25 % |
+| G | Gripper open / close (Annin servo gripper on the Nano board) |
+| 4 5 6 7 / 0 | Save the tool position as that marker / as park |
+| ENTER | Write `robot_calib.json` (same file as teach) and show fit errors |
+| ESC | Stop the move (8.1 only; on 6.x use the red E-stop) |
+| Q | Quit |
+
+With a calibration saved, the tool cannot go below the taught mat height minus 3 mm.
+The gripper is driven by the Arduino Nano I/O board (its own USB port, usually
+`/dev/ttyUSB0`), not the Teensy. `src/gripper.py` detects whether the Nano runs Annin's
+JSON sketch (2.x) or the older text sketch (1.x). Annin's default angles are open 45 and
+closed 0; tune `OPEN_POS` / `CLOSED_POS` in `gripper.py`. Use `--gripper-port` if it is
+not found, or `--no-gripper` to skip it.
 
 ## 6. Evidence for the report
 
