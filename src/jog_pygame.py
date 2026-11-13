@@ -117,7 +117,8 @@ def draw(screen, fonts, j, step_mm, speed, grip, saved, fw, fit_lines, corners, 
         screen.blit(font.render(s, True, colour), (x, y))
         y += font.get_linesize()
 
-    text(f"AR4 jog  (firmware {fw})", mid, DIM)
+    text(f"AR4 jog  (firmware {fw}{', laptop kinematics - no wrist flips' if getattr(j.arm, 'local_ik', False) else ''})",
+         mid, DIM)
     text(f"X {p['x']:7.1f}   Y {p['y']:7.1f}   Z {p['z']:7.1f}  mm", big, FG)
     j5 = p["joints"][4]
     hr = j.hold_rot
@@ -265,9 +266,12 @@ def main(argv=None):
                             new_rot = [0.0, 180.0, 0.0]
                             what = "Gripper set straight down"
                         else:
-                            new_rot = list(j.hold_rot)
-                            new_rot[0] += -5.0 if k == pygame.K_z else 5.0
-                            what = f"Gripper turned to Rz {new_rot[0]:.0f}"
+                            if not getattr(arm, "local_ik", False):
+                                j.say("Z/X turning needs the 6.x laptop kinematics", AMBER)
+                                continue
+                            import kinematics as K
+                            new_rot = K.rotate_about_vertical(j.hold_rot, -5.0 if k == pygame.K_z else 5.0)
+                            what = "Gripper turned 5 deg"
 
                         def reorient(rot=new_rot, msg=what, x=p["x"], y=p["y"], z=p["z"]):
                             j.pose = arm.move_linear(x, y, z, rot, min(speed, 10))

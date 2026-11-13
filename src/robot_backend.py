@@ -148,12 +148,26 @@ class V8Robot:
 
 
 class LegacyRobot:
+    """Annin 6.x. Cartesian moves are planned on the laptop (kinematics.py) and sent as
+    direct joint moves (RJ): the 6.x firmware's own IK can jump to the mirrored wrist
+    (J4/J5/J6 swing ~180 deg) near the wrist singularity. Falls back to the firmware's
+    moves if the laptop model does not match this robot (e.g. a tool frame set in the HMI)."""
     supports_stop = False
 
-    def __init__(self, port=None, loop_mode="000000"):
+    def __init__(self, port=None, loop_mode="000000", local_ik=True):
         from ar4link import AR4
+        import kinematics as K
+        self.K = K
         self.a = AR4(port, loop_mode=loop_mode)
         self.port = self.a.port
+        self.local_ik = False
+        if local_ik:
+            p = self.a.pose()
+            if K.model_matches(p.joints, p.xyz, [p.rz, p.ry, p.rx]):
+                self.local_ik = True
+            else:
+                print("NOTE: the laptop arm model does not match this controller (tool frame or "
+                      "DH changed in the HMI?) - using the firmware's own moves.")
 
     @staticmethod
     def _conv(p):
@@ -176,9 +190,18 @@ class LegacyRobot:
         from ar4link import AR4Error
         _check_speed(speed)
         try:
-            return self._conv(self.a.move_linear(x, y, z, *rot, speed_pct=speed))
+            if not self.local_ik:
+                return self._conv(self.a.move_linear(x, y, z, *rot, speed_pct=speed))
+            q0 = self.a.pose().joints
+            waypoints = self.K.plan_line(q0, (x, y, z), rot)
+            p = None
+            for q in waypoints:
+                p = self.a.move_joints(list(q), speed_pct=speed)
+            return self._conv(p) if p is not None else self.pose()
         except AR4Error as e:
             raise RobotFault(str(e))
+        except self.K.KinematicsError as e:
+            raise RobotFault(f"Move refused: {e}")
 
     def move_joints(self, angles, speed=10):
         from ar4link import AR4Error
@@ -189,10 +212,19 @@ class LegacyRobot:
             raise RobotFault(str(e))
 
     def move_joint(self, x, y, z, rot, speed=10):
+        """Joint-interpolated move to a pose (path not straight). Used for parking."""
         from ar4link import AR4Error
         _check_speed(speed)
         try:
+            if self.local_ik:
+                import numpy as np
+                q0 = self.a.pose().joints
+                q = self.K.ik(np.array([x, y, z], float), self.K.rotvec_to_R(rot), q0)
+                self.K.check_limits(q)
+                return self._conv(self.a.move_joints(list(q), speed_pct=speed))
             return self._conv(self.a.move_joint(x, y, z, *rot, speed_pct=speed))
+        except self.K.KinematicsError as e:
+            raise RobotFault(f"Move refused: {e}")
         except AR4Error as e:
             raise RobotFault(str(e))
 
