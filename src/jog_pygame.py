@@ -13,6 +13,9 @@ The robot frame: X = away from the base, Y = to the robot's left, Z = up.
     UP / DOWN    step size  1 2 5 10 20 50 mm
     R            re-lock the gripper orientation to the current pose (it is locked
                  when the window opens, so jogging never rotates the gripper)
+    V            point the gripper STRAIGHT DOWN (Ry 180) in place - needs Z >= 120 mm.
+                 Straight down keeps J4/J5 still when the base turns (no 180 flips)
+    Z / X        turn the gripper about the vertical axis -5 / +5 deg (finger direction)
     LEFT / RIGHT speed  5 - 25 %
     G            gripper open / close (if the Nano gripper board is connected)
     0-9          save the tool position as the ArUco marker with that ID
@@ -43,6 +46,7 @@ import vision_config as cfg
 from robot_backend import connect, RobotFault, MAX_SPEED
 
 STEPS = [1, 2, 5, 10, 20, 50]
+V_MIN_Z = 120.0   # mm: re-orient the gripper only well above the table
 FLOOR_MARGIN_MM = 3.0
 
 BG, FG, DIM = (24, 26, 32), (230, 232, 236), (140, 146, 158)
@@ -123,6 +127,9 @@ def draw(screen, fonts, j, step_mm, speed, grip, saved, fw, fit_lines, corners, 
     text("J " + "  ".join(f"{a:6.1f}" for a in p["joints"]), small, DIM)
     if abs(j5) < 5:
         text("J5 near 0: wrist singularity zone - the wrist may flip (8.1 fixes this)", small, AMBER)
+    if abs(p["joints"][3]) > 90:
+        text(f"J4 at {p['joints'][3]:.0f} deg: wrist twisted - press V (gripper straight down) "
+             "at a safe height", small, AMBER)
     y += 6
     state = "MOVING" if j.busy() else "idle"
     text(f"step {step_mm} mm    speed {speed}%    {state}    gripper: {grip}", mid,
@@ -147,7 +154,7 @@ def draw(screen, fonts, j, step_mm, speed, grip, saved, fw, fit_lines, corners, 
         text(line, small, AMBER if line.startswith("!") else BLUE)
     y += 8
     for line in ["W/S +X/-X   A/D +Y/-Y   SPACE up   CTRL down   (hold to repeat)",
-                 "UP/DOWN step   LEFT/RIGHT speed   G gripper   R re-lock orientation   ESC stop   Q quit",
+                 "UP/DOWN step  LEFT/RIGHT speed  G gripper  R re-lock  V straight down  Z/X turn  ESC stop  Q quit",
                  f"{' '.join(str(k) for k in sorted(cfg.MARKER_POSITIONS_MM))} save marker   "
                  "P save park   ENTER write calibration   B board corner   N restart corners"]:
         text(line, small, DIM)
@@ -249,6 +256,25 @@ def main(argv=None):
                             j.say("Orientation re-locked to the current pose", GREEN)
                         except RobotFault as e:
                             j.say(f"Could not read pose: {e}", RED)
+                    elif k in (pygame.K_v, pygame.K_z, pygame.K_x):
+                        p = j.pose
+                        if k == pygame.K_v:
+                            if p["z"] < V_MIN_Z:
+                                j.say(f"Raise above Z {V_MIN_Z:.0f} first (SPACE), then press V", AMBER)
+                                continue
+                            new_rot = [0.0, 180.0, 0.0]
+                            what = "Gripper set straight down"
+                        else:
+                            new_rot = list(j.hold_rot)
+                            new_rot[0] += -5.0 if k == pygame.K_z else 5.0
+                            what = f"Gripper turned to Rz {new_rot[0]:.0f}"
+
+                        def reorient(rot=new_rot, msg=what, x=p["x"], y=p["y"], z=p["z"]):
+                            j.pose = arm.move_linear(x, y, z, rot, min(speed, 10))
+                            j.hold_rot = list(rot)
+                            j.say(msg + " - check it by eye; if wrong, press the red E-stop", GREEN)
+
+                        j.start(reorient)
                     elif k == pygame.K_n:
                         corners, board_lines = {}, []
                         j.say("Corner sequence restarted: go to a1 and press B", FG)

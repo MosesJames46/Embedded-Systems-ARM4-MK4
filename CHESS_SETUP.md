@@ -51,8 +51,12 @@ wrist-singularity problem (J5 near 0 makes the wrist spin). All commands below u
    ```bash
    python main.py jog --firmware 6
    ```
-   Click the window first. Keep the gripper pointing straight down and use the **same
-   height** (tip about 10 mm above the surface) for every point.
+   Click the window first. **First raise the arm (SPACE) above Z 120 and press `V`**: the
+   gripper turns to point **straight down** and stays that way. This matters: a tilted
+   gripper forces J4/J5 to twist (and flip 180 deg) whenever the base turns; straight down,
+   only J6 turns. Use `Z` / `X` to turn the fingers if needed. Then use the **same height**
+   (tip about 10 mm above the surface) for every point. If J4 shows more than 90 deg,
+   the window warns you.
 
    | Do | Key |
    |---|---|
