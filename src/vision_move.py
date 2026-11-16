@@ -110,6 +110,9 @@ def load_calib():
     with open(cfg.CALIB_FILE) as f:
         c = json.load(f)
     plane = ws.taught_plane(c, cfg.MARKER_POSITIONS_MM)
+    if "board_z" not in c:
+        raise SystemExit("Calibration not finished: in python main.py jog, teach the cards and "
+                         "press ENTER (that computes the mat height).")
     if plane is not None:
         # All markers taught: camera maps straight to robot mm, so board == robot frame.
         c["plane"] = plane

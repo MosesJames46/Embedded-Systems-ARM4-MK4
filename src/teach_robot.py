@@ -63,6 +63,20 @@ def load_saved():
     return {int(k) if k.isdigit() else k: v for k, v in old.get("taught", {}).items()}
 
 
+def save_points(points, firmware=None):
+    """Write taught points (e.g. {"park": pose}) into robot_calib.json immediately,
+    keeping everything else in the file. No fit needed, so park can be saved alone."""
+    data = {}
+    if os.path.exists(CALIB_FILE):
+        with open(CALIB_FILE) as f:
+            data = json.load(f)
+    data.setdefault("taught", {}).update({str(k): v for k, v in points.items()})
+    if firmware and "firmware" not in data:
+        data["firmware"] = firmware
+    with open(CALIB_FILE, "w") as f:
+        json.dump(data, f, indent=2)
+
+
 def write_calib(saved, firmware):
     """Fit board->robot from the saved marker poses and write robot_calib.json."""
     ids, M, err = fit(saved)
@@ -148,6 +162,7 @@ def main():
                     continue
                 saved[key] = arm.pose()
                 saved[key]["rot"] = list(hold_rot)
+                save_points({key: saved[key]}, args.firmware)   # on disk now, not only at 'w'
                 print(f"Saved {key}: {saved[key]['x']:.1f}, {saved[key]['y']:.1f}, "
                       f"{saved[key]['z']:.1f}")
             elif line == "w":

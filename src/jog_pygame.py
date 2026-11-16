@@ -175,7 +175,7 @@ def main(argv=None):
         with open(cfg.CALIB_FILE) as f:
             calib = json.load(f)
     fw = args.firmware or (calib or {}).get("firmware", cfg.FIRMWARE)
-    floor_z = calib["board_z"] - FLOOR_MARGIN_MM if calib else None
+    floor_z = calib["board_z"] - FLOOR_MARGIN_MM if calib and "board_z" in calib else None
 
     arm = connect(fw, args.port, cfg.LOOP_MODE)
     j = Jogger(arm, floor_z)
@@ -245,9 +245,10 @@ def main(argv=None):
                         try:
                             saved[name] = arm.pose()
                             saved[name]["rot"] = list(j.hold_rot)
+                            teach.save_points({name: saved[name]}, fw)   # written to disk now
                             j.pose = saved[name]
                             j.say(f"Saved {name} at X {j.pose['x']:.1f} Y {j.pose['y']:.1f} "
-                                  f"Z {j.pose['z']:.1f}", GREEN)
+                                  f"Z {j.pose['z']:.1f} -> {os.path.basename(cfg.CALIB_FILE)}", GREEN)
                         except RobotFault as e:
                             j.say(f"Could not read pose: {e}", RED)
                     elif k == pygame.K_r:

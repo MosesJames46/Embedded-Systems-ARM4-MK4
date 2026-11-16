@@ -106,13 +106,16 @@ def park(argv):
     with open(cfg.CALIB_FILE) as f:
         calib = json.load(f)
     if "park" not in calib.get("taught", {}):
-        raise SystemExit("No park pose saved - run teach and type: save park, then w")
+        raise SystemExit("No park pose saved - in python main.py jog, move there and press P")
     p = calib["taught"]["park"]
+    print(f"Park pose from {cfg.CALIB_FILE}: X {p['x']:.1f}  Y {p['y']:.1f}  Z {p['z']:.1f}")
     fw = args.firmware or calib.get("firmware", cfg.FIRMWARE)
     arm = connect(fw, args.port, cfg.LOOP_MODE)
     try:
         cur = arm.pose()
-        safe = calib["board_z"] + cfg.SAFE_Z_MM
+        # travel height: above the mat if it has been taught, else no lower than now or park
+        safe = (calib["board_z"] + cfg.SAFE_Z_MM if "board_z" in calib
+                else max(cur["z"], p["z"]))
         if cur["z"] < safe - 1:
             print("Rising to safe height ...")
             arm.move_linear(cur["x"], cur["y"], safe, cur["rot"], cfg.SPEED_PCT)
