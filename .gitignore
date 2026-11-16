@@ -18,3 +18,4 @@ __pycache__/
 Thumbs.db
 src/Embedded-Systems-ARM4-MK4/
 src/dataset/
+src/jog_settings.json

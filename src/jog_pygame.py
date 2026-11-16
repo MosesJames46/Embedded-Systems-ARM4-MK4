@@ -6,8 +6,17 @@
 Hold a key to keep moving; each step is one straight-line move of the current step size.
 The robot frame: X = away from the base, Y = to the robot's left, Z = up.
 
-    W / S        +X / -X  (away from / toward the base)
-    A / D        +Y / -Y  (robot's left / right)
+    M            switch mode:  BASE (default)  or  XYZ
+    BASE mode    A / D  turn the base (J1 ONLY) left / right - the arm sweeps sideways
+                 W / S  reach out / pull in along the arm's current direction
+                 SPACE / CTRL  up / down
+    XYZ mode     straight lines in robot X / Y (several joints move together):
+    W / S        forward / back    }  as seen from where YOU stand - press O to tell the
+    A / D        left / right      }  window where that is (behind, opposite, left, right
+                                      of the robot); the window shows which robot axis
+                                      each key drives. Default: behind the robot, i.e.
+                                      W = X+ (away from the base), A = Y+ (robot's left)
+    O            change where you stand (saved for next time)
     SPACE        +Z  (up)
     CTRL         -Z  (down)
     UP / DOWN    step size  1 2 5 10 20 50 mm
@@ -38,6 +47,7 @@ import os
 import threading
 import time
 
+import numpy as np
 import pygame
 
 import teach_robot as teach
@@ -47,18 +57,58 @@ from robot_backend import connect, RobotFault, MAX_SPEED
 
 STEPS = [1, 2, 5, 10, 20, 50]
 V_MIN_Z = 120.0   # mm: re-orient the gripper only well above the table
+J1_LIMITS = (-165.0, 165.0)
 FLOOR_MARGIN_MM = 3.0
 
 BG, FG, DIM = (24, 26, 32), (230, 232, 236), (140, 146, 158)
 GREEN, RED, AMBER, BLUE = (90, 200, 120), (235, 90, 90), (240, 180, 70), (110, 160, 240)
 
 
-def jog_vector(keys):
-    """Direction from held keys: (dx, dy, dz) in units of one step."""
-    dx = (keys[pygame.K_w] - keys[pygame.K_s])
-    dy = (keys[pygame.K_a] - keys[pygame.K_d])
+# Where the operator stands, so W = "away from me" and A = "my left" wherever that is.
+# heading = direction the operator faces, in the robot frame (deg, X+ = 0, Y+ = 90).
+VIEWS = [("BEHIND the robot (facing the board)", 0),
+         ("OPPOSITE the robot (facing it)", 180),
+         ("on the robot's RIGHT side", 90),
+         ("on the robot's LEFT side", 270)]
+VIEW_FILE = os.path.join(cfg.HERE, "jog_settings.json")
+
+
+def load_view():
+    try:
+        with open(VIEW_FILE) as f:
+            return int(json.load(f).get("view", 0)) % len(VIEWS)
+    except (OSError, ValueError):
+        return 0
+
+
+def save_view(i):
+    try:
+        with open(VIEW_FILE, "w") as f:
+            json.dump({"view": i}, f)
+    except OSError:
+        pass
+
+
+def jog_vector(keys, view=0):
+    """Held keys -> (dx, dy, dz) in the ROBOT frame, in units of one step.
+    W/S = forward/back and A/D = left/right as seen from where the operator stands."""
+    fwd = keys[pygame.K_w] - keys[pygame.K_s]
+    left = keys[pygame.K_a] - keys[pygame.K_d]
     dz = keys[pygame.K_SPACE] - (keys[pygame.K_LCTRL] or keys[pygame.K_RCTRL])
-    return dx, dy, dz
+    th = np.radians(VIEWS[view][1])
+    dx = fwd * np.cos(th) - left * np.sin(th)
+    dy = fwd * np.sin(th) + left * np.cos(th)
+    return round(float(dx), 6), round(float(dy), 6), dz
+
+
+def key_meaning(view):
+    """Text: what W and A do in robot coordinates for this view."""
+    names = {(1, 0): "X+ (away from robot)", (-1, 0): "X- (toward robot)",
+             (0, 1): "Y+ (robot's left)", (0, -1): "Y- (robot's right)"}
+    th = np.radians(VIEWS[view][1])
+    w = (round(np.cos(th)), round(np.sin(th)))
+    a = (round(-np.sin(th)), round(np.cos(th)))
+    return f"W = {names[w]}   A = {names[a]}"
 
 
 class Jogger:
@@ -96,6 +146,26 @@ class Jogger:
             except Exception:
                 pass
 
+    def turn_base(self, sign, step_mm, speed):
+        """Rotate J1 ONLY, so the gripper sweeps sideways by about step_mm along an arc."""
+        p = self.pose
+        q = list(p["joints"])
+        r = max(float(np.hypot(p["x"], p["y"])), 100.0)
+        dtheta = float(np.degrees(step_mm / r)) * sign
+        lo, hi = J1_LIMITS
+        if not (lo <= q[0] + dtheta <= hi):
+            self.say(f"Refused: J1 would be at {q[0] + dtheta:.0f} deg (limit {lo:.0f}..{hi:.0f})", RED)
+            return
+        q[0] += dtheta
+        self.pose = self.arm.move_joints(q, speed)
+        # the whole arm turned about the vertical, so the held gripper direction turns with it
+        if getattr(self.arm, "local_ik", False):
+            import kinematics as K
+            self.hold_rot = K.rotate_about_vertical(self.hold_rot, dtheta)
+        else:
+            self.hold_rot = list(self.pose["rot"])
+        self.say(f"Base turned {dtheta:+.1f} deg (J1 = {q[0]:.1f})", FG)
+
     def step(self, dx, dy, dz, step_mm, speed):
         p = self.pose
         x, y, z = p["x"] + dx * step_mm, p["y"] + dy * step_mm, p["z"] + dz * step_mm
@@ -106,7 +176,7 @@ class Jogger:
         self.say(f"Moved to X {x:.1f}  Y {y:.1f}  Z {z:.1f}", FG)
 
 
-def draw(screen, fonts, j, step_mm, speed, grip, saved, fw, fit_lines, corners, board_lines):
+def draw(screen, fonts, j, step_mm, speed, grip, saved, fw, fit_lines, corners, board_lines, view, mode):
     big, mid, small = fonts
     screen.fill(BG)
     p = j.pose
@@ -133,6 +203,12 @@ def draw(screen, fonts, j, step_mm, speed, grip, saved, fw, fit_lines, corners, 
              "at a safe height", small, AMBER)
     y += 6
     state = "MOVING" if j.busy() else "idle"
+    if mode == "base":
+        text(f"BASE mode: A/D turn the base (J1 only)  W/S reach out/in  SPACE/CTRL up/down   "
+             f"(M = XYZ mode, O = where you stand: {VIEWS[view][0].split(' (')[0]})", small, GREEN)
+    else:
+        text(f"XYZ mode - you stand {VIEWS[view][0]}:  {key_meaning(view)}   (M = BASE mode, O = change)",
+             small, GREEN)
     text(f"step {step_mm} mm    speed {speed}%    {state}    gripper: {grip}", mid,
          AMBER if j.busy() else GREEN)
     if j.floor_z is not None:
@@ -154,7 +230,7 @@ def draw(screen, fonts, j, step_mm, speed, grip, saved, fw, fit_lines, corners, 
     for line in board_lines:
         text(line, small, AMBER if line.startswith("!") else BLUE)
     y += 8
-    for line in ["W/S +X/-X   A/D +Y/-Y   SPACE up   CTRL down   (hold to repeat)",
+    for line in ["BASE: A/D turn base  W/S reach out/in   XYZ: straight lines   M = switch mode   SPACE up  CTRL down",
                  "UP/DOWN step  LEFT/RIGHT speed  G gripper  R re-lock  V straight down  Z/X turn  ESC stop  Q quit",
                  f"{' '.join(str(k) for k in sorted(cfg.MARKER_POSITIONS_MM))} save marker   "
                  "P save park   ENTER write calibration   B board corner   N restart corners"]:
@@ -194,13 +270,15 @@ def main(argv=None):
 
     pygame.display.init()   # no pygame.init(): skips audio (avoids ALSA errors)
     pygame.font.init()
-    screen = pygame.display.set_mode((900, 430))
+    screen = pygame.display.set_mode((980, 450))
     pygame.display.set_caption("AR4 jog - click here so the keys go to this window")
     fonts = (pygame.font.SysFont("monospace", 30, bold=True),
              pygame.font.SysFont("monospace", 20),
              pygame.font.SysFont("monospace", 16))
     clock = pygame.time.Clock()
     step_i, speed = STEPS.index(10), min(cfg.SPEED_PCT, MAX_SPEED)
+    view = load_view()
+    mode = "base"
     running = True
     try:
         while running:
@@ -216,6 +294,14 @@ def main(argv=None):
                             arm.stop()
                             j.say("STOP sent" if arm.supports_stop
                                   else "No software stop on 6.x - use the red E-stop", AMBER)
+                    elif k == pygame.K_m:
+                        mode = "xyz" if mode == "base" else "base"
+                        j.say("XYZ mode: straight lines in robot X/Y" if mode == "xyz" else
+                              "BASE mode: A/D turn J1 only, W/S reach out/in", GREEN)
+                    elif k == pygame.K_o:
+                        view = (view + 1) % len(VIEWS)
+                        save_view(view)
+                        j.say(f"You stand {VIEWS[view][0]} - {key_meaning(view)}", GREEN)
                     elif k == pygame.K_UP:
                         step_i = min(step_i + 1, len(STEPS) - 1)
                     elif k == pygame.K_DOWN:
@@ -313,11 +399,24 @@ def main(argv=None):
                         except ValueError as e:
                             j.say(str(e), RED)
             if not j.busy():
-                dx, dy, dz = jog_vector(pygame.key.get_pressed())
-                if dx or dy or dz:
-                    j.start(j.step, dx, dy, dz, STEPS[step_i], speed)
+                keys = pygame.key.get_pressed()
+                if mode == "base":
+                    flip = -1 if VIEWS[view][1] == 180 else 1   # facing the robot: mirror
+                    turn = (keys[pygame.K_a] - keys[pygame.K_d]) * flip
+                    reach = (keys[pygame.K_w] - keys[pygame.K_s]) * flip
+                    dz = keys[pygame.K_SPACE] - (keys[pygame.K_LCTRL] or keys[pygame.K_RCTRL])
+                    if turn:
+                        j.start(j.turn_base, turn, STEPS[step_i], speed)
+                    elif reach or dz:
+                        phi = np.arctan2(j.pose["y"], j.pose["x"])   # along the arm's direction
+                        j.start(j.step, reach * np.cos(phi), reach * np.sin(phi), dz,
+                                STEPS[step_i], speed)
+                else:
+                    dx, dy, dz = jog_vector(keys, view)
+                    if dx or dy or dz:
+                        j.start(j.step, dx, dy, dz, STEPS[step_i], speed)
             draw(screen, fonts, j, STEPS[step_i], speed, grip_state, saved, fw, fit_lines,
-                 corners, board_lines)
+                 corners, board_lines, view, mode)
             clock.tick(30)
     finally:
         if j.busy():
