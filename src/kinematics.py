@@ -27,6 +27,7 @@ POS_TOL = 0.01      # mm
 ROT_TOL = 1e-4      # rad
 MAX_STEP_DEG = 12.0   # largest joint change allowed between 5 mm path samples
 PATH_DEV_MM = 2.0     # max deviation from the straight line between sent waypoints
+SAMPLE_DEG = 1.0      # rotation sampled every 1 deg when planning
 
 
 class KinematicsError(RuntimeError):
@@ -78,6 +79,22 @@ def pose_of(q):
     """(xyz, rotvec deg) like the controller reports."""
     M = fk(q)
     return M[:3, 3], R_to_rotvec(M[:3, :3])
+
+
+def rotate_about_world(rv_deg, axis, deg):
+    """Turn an orientation about a world axis ('x', 'y' or 'z') through the tool point."""
+    a = np.radians(deg)
+    c, s = np.cos(a), np.sin(a)
+    R = {"x": np.array([[1, 0, 0], [0, c, -s], [0, s, c]]),
+         "y": np.array([[c, 0, s], [0, 1, 0], [-s, 0, c]]),
+         "z": np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]])}[axis]
+    return R_to_rotvec(R @ rotvec_to_R(rv_deg)).tolist()
+
+
+def tilt_from_down(rv_deg):
+    """Degrees between the gripper axis and straight down (0 = pointing straight down)."""
+    z = rotvec_to_R(rv_deg)[:, 2]
+    return float(np.degrees(np.arccos(np.clip(-z[2], -1, 1))))
 
 
 def rotate_about_vertical(rv_deg, deg):
@@ -142,9 +159,12 @@ def plan_line(q0, p_target, rv_target, sample_mm=5.0):
     R1 = rotvec_to_R(rv_target)
     R0 = fk(q0)[:3, :3]
     p1 = np.asarray(p_target, float)
-    n = max(1, int(np.ceil(np.linalg.norm(p1 - p0) / sample_mm)))
     # orientation interpolated by slerp-like rotation vector of the relative rotation
     rel = R_to_rotvec(R0.T @ R1)
+    # sample often enough for BOTH the distance (every sample_mm) and the rotation
+    # (every SAMPLE_DEG), so a pure tilt is not solved as one big jump
+    n = max(1, int(np.ceil(np.linalg.norm(p1 - p0) / sample_mm)),
+            int(np.ceil(np.linalg.norm(rel) / SAMPLE_DEG)))
     qs, ps = [q0], [p0]
     q = q0
     for k in range(1, n + 1):
@@ -155,8 +175,8 @@ def plan_line(q0, p_target, rv_target, sample_mm=5.0):
         jump = np.max(np.abs(qn - q))
         if jump > MAX_STEP_DEG:
             raise KinematicsError(
-                f"path passes through the wrist singularity (a joint would swing {jump:.0f} deg "
-                f"in {sample_mm:.0f} mm) - approach from another direction or tilt the gripper")
+                f"too close to the wrist singularity (J5 near 0): a joint would swing {jump:.0f} deg "
+                "in one small step - tilt the gripper a little first, or approach from another direction")
         check_limits(qn)
         qs.append(qn)
         ps.append(p)

@@ -6,7 +6,16 @@
 Hold a key to keep moving; each step is one straight-line move of the current step size.
 The robot frame: X = away from the base, Y = to the robot's left, Z = up.
 
-    M            switch mode:  BASE (default)  or  XYZ
+    M            switch mode:  BASE (default) -> XYZ -> JOINT -> ROTATE -> BASE
+    ROTATE mode  the gripper turns in place (the tool point stays put):
+                 W / S  tilt the tip away from / toward the robot
+                 A / D  tilt the tip to the robot's left / right
+                 SPACE / CTRL  turn about the vertical
+                 UP / DOWN  step 0.5 1 2 5 10 deg.  The window always shows how many
+                 degrees the gripper is from straight down (V snaps it to 0)
+    JOINT mode   TAB  choose the joint (J1..J6),  W / S  move it + / -
+                 UP / DOWN  step 0.5 1 2 5 10 deg.  Only that joint moves; the gripper may
+                 tilt - press V (above Z 120) to point it straight down again
     BASE mode    A / D  turn the base (J1 ONLY) left / right - the arm sweeps sideways
                  W / S  reach out / pull in along the arm's current direction
                  SPACE / CTRL  up / down
@@ -58,6 +67,9 @@ from robot_backend import connect, RobotFault, MAX_SPEED
 STEPS = [1, 2, 5, 10, 20, 50]
 V_MIN_Z = 120.0   # mm: re-orient the gripper only well above the table
 J1_LIMITS = (-165.0, 165.0)
+# Annin defaults (same as the HMI sliders); the firmware enforces its own configured limits too
+JOINT_LIMITS = [(-165, 165), (-40, 88), (-87, 50), (-178, 178), (-103, 103), (-178, 178)]
+JOINT_STEPS = [0.5, 1, 2, 5, 10]
 FLOOR_MARGIN_MM = 3.0
 
 BG, FG, DIM = (24, 26, 32), (230, 232, 236), (140, 146, 158)
@@ -166,6 +178,32 @@ class Jogger:
             self.hold_rot = list(self.pose["rot"])
         self.say(f"Base turned {dtheta:+.1f} deg (J1 = {q[0]:.1f})", FG)
 
+    def move_one_joint(self, index, sign, step_deg, speed):
+        """Move ONE joint by step_deg. The gripper orientation follows (re-locked after)."""
+        p = self.pose
+        q = list(p["joints"])
+        lo, hi = JOINT_LIMITS[index]
+        target = q[index] + sign * step_deg
+        if not (lo <= target <= hi):
+            self.say(f"Refused: J{index + 1} would be at {target:.1f} deg (limit {lo:.0f}..{hi:.0f})", RED)
+            return
+        q[index] = target
+        new = self.arm.move_joints(q, speed)
+        if self.floor_z is not None and new["z"] < self.floor_z:
+            self.say(f"Warning: tool now below the mat floor (Z {new['z']:.0f}) - raise it", AMBER)
+        self.pose = new
+        self.hold_rot = list(new["rot"])     # keep whatever orientation this left us in
+        self.say(f"J{index + 1} -> {target:.1f} deg", FG)
+
+    def rotate(self, axis, sign, step_deg, speed):
+        """Tilt / turn the gripper about a world axis; the tool point stays where it is."""
+        import kinematics as K
+        p = self.pose
+        new_rot = K.rotate_about_world(self.hold_rot, axis, sign * step_deg)
+        self.pose = self.arm.move_linear(p["x"], p["y"], p["z"], new_rot, speed)
+        self.hold_rot = list(new_rot)
+        self.say(f"Gripper {K.tilt_from_down(new_rot):.1f} deg from straight down", FG)
+
     def step(self, dx, dy, dz, step_mm, speed):
         p = self.pose
         x, y, z = p["x"] + dx * step_mm, p["y"] + dy * step_mm, p["z"] + dz * step_mm
@@ -176,7 +214,8 @@ class Jogger:
         self.say(f"Moved to X {x:.1f}  Y {y:.1f}  Z {z:.1f}", FG)
 
 
-def draw(screen, fonts, j, step_mm, speed, grip, saved, fw, fit_lines, corners, board_lines, view, mode):
+def draw(screen, fonts, j, step_mm, speed, grip, saved, fw, fit_lines, corners, board_lines, view, mode,
+         sel_joint=0, jstep_i=2):
     big, mid, small = fonts
     screen.fill(BG)
     p = j.pose
@@ -203,7 +242,18 @@ def draw(screen, fonts, j, step_mm, speed, grip, saved, fw, fit_lines, corners, 
              "at a safe height", small, AMBER)
     y += 6
     state = "MOVING" if j.busy() else "idle"
-    if mode == "base":
+    if getattr(j.arm, "local_ik", False):
+        import kinematics as K
+        tilt = K.tilt_from_down(j.hold_rot)
+        text(f"gripper {tilt:.1f} deg from straight down" + ("  (pointing down)" if tilt < 1 else ""),
+             small, GREEN if tilt < 1 else AMBER)
+    if mode == "rotate":
+        text(f"ROTATE mode: W/S tilt away/toward robot  A/D tilt left/right  SPACE/CTRL turn   "
+             f"step {JOINT_STEPS[jstep_i]} deg   (M = BASE mode)", small, GREEN)
+    elif mode == "joint":
+        text(f"JOINT mode: J{sel_joint + 1} selected ({p['joints'][sel_joint]:.1f} deg)  W/S move it  "
+             f"TAB next joint  step {JOINT_STEPS[jstep_i]} deg   (M = BASE mode)", small, GREEN)
+    elif mode == "base":
         text(f"BASE mode: A/D turn the base (J1 only)  W/S reach out/in  SPACE/CTRL up/down   "
              f"(M = XYZ mode, O = where you stand: {VIEWS[view][0].split(' (')[0]})", small, GREEN)
     else:
@@ -279,6 +329,7 @@ def main(argv=None):
     step_i, speed = STEPS.index(10), min(cfg.SPEED_PCT, MAX_SPEED)
     view = load_view()
     mode = "base"
+    sel_joint, jstep_i = 1, 2          # JOINT mode: J2 selected, 2 deg steps
     running = True
     try:
         while running:
@@ -295,17 +346,32 @@ def main(argv=None):
                             j.say("STOP sent" if arm.supports_stop
                                   else "No software stop on 6.x - use the red E-stop", AMBER)
                     elif k == pygame.K_m:
-                        mode = "xyz" if mode == "base" else "base"
-                        j.say("XYZ mode: straight lines in robot X/Y" if mode == "xyz" else
-                              "BASE mode: A/D turn J1 only, W/S reach out/in", GREEN)
+                        mode = {"base": "xyz", "xyz": "joint", "joint": "rotate", "rotate": "base"}[mode]
+                        if mode == "rotate" and not getattr(arm, "local_ik", False):
+                            mode = "base"
+                            j.say("ROTATE mode needs the 6.x laptop kinematics", AMBER)
+                            continue
+                        j.say({"xyz": "XYZ mode: straight lines in robot X/Y",
+                               "rotate": "ROTATE mode: WASD tilt, SPACE/CTRL turn - the gripper turns in place",
+                               "joint": "JOINT mode: TAB picks the joint, W/S move only that joint",
+                               "base": "BASE mode: A/D turn J1 only, W/S reach out/in"}[mode], GREEN)
+                    elif k == pygame.K_TAB and mode == "joint":
+                        sel_joint = (sel_joint + 1) % 6
+                        j.say(f"J{sel_joint + 1} selected", FG)
                     elif k == pygame.K_o:
                         view = (view + 1) % len(VIEWS)
                         save_view(view)
                         j.say(f"You stand {VIEWS[view][0]} - {key_meaning(view)}", GREEN)
                     elif k == pygame.K_UP:
-                        step_i = min(step_i + 1, len(STEPS) - 1)
+                        if mode in ("joint", "rotate"):
+                            jstep_i = min(jstep_i + 1, len(JOINT_STEPS) - 1)
+                        else:
+                            step_i = min(step_i + 1, len(STEPS) - 1)
                     elif k == pygame.K_DOWN:
-                        step_i = max(step_i - 1, 0)
+                        if mode in ("joint", "rotate"):
+                            jstep_i = max(jstep_i - 1, 0)
+                        else:
+                            step_i = max(step_i - 1, 0)
                     elif k == pygame.K_RIGHT:
                         speed = min(speed + 5, MAX_SPEED)
                     elif k == pygame.K_LEFT:
@@ -400,7 +466,24 @@ def main(argv=None):
                             j.say(str(e), RED)
             if not j.busy():
                 keys = pygame.key.get_pressed()
-                if mode == "base":
+                if mode == "rotate":
+                    tilt_fwd = keys[pygame.K_w] - keys[pygame.K_s]
+                    tilt_side = keys[pygame.K_a] - keys[pygame.K_d]
+                    turn = keys[pygame.K_SPACE] - (keys[pygame.K_LCTRL] or keys[pygame.K_RCTRL])
+                    deg = JOINT_STEPS[jstep_i]
+                    # checked numerically: tip away from robot (+X) = negative turn about Y,
+                    # tip to the robot's left (+Y) = positive turn about X
+                    if tilt_fwd:
+                        j.start(j.rotate, "y", -tilt_fwd, deg, speed)
+                    elif tilt_side:
+                        j.start(j.rotate, "x", tilt_side, deg, speed)
+                    elif turn:
+                        j.start(j.rotate, "z", turn, deg, speed)
+                elif mode == "joint":
+                    sgn = keys[pygame.K_w] - keys[pygame.K_s]
+                    if sgn:
+                        j.start(j.move_one_joint, sel_joint, sgn, JOINT_STEPS[jstep_i], speed)
+                elif mode == "base":
                     flip = -1 if VIEWS[view][1] == 180 else 1   # facing the robot: mirror
                     turn = (keys[pygame.K_a] - keys[pygame.K_d]) * flip
                     reach = (keys[pygame.K_w] - keys[pygame.K_s]) * flip
@@ -416,7 +499,7 @@ def main(argv=None):
                     if dx or dy or dz:
                         j.start(j.step, dx, dy, dz, STEPS[step_i], speed)
             draw(screen, fonts, j, STEPS[step_i], speed, grip_state, saved, fw, fit_lines,
-                 corners, board_lines, view, mode)
+                 corners, board_lines, view, mode, sel_joint, jstep_i)
             clock.tick(30)
     finally:
         if j.busy():
