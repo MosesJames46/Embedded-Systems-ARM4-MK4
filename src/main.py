@@ -10,6 +10,7 @@ Run from the src folder:
                                 In the video window: C new target, M multi-target mode (1-9 / click
                                 to select, A = visit all), + / - hover clearance, ] / [ target height
     python main.py park         Move the arm straight up, then to the saved park pose
+    python main.py limits       Show / set joint limits (e.g. limits J3 -89 70) to match the HMI
     python main.py jog          Keyboard jog window (WASD = X/Y, SPACE/CTRL = up/down);
                                 saves marker/park points and the 4 board corners (key B)
     python main.py jointtest    Motor check, one joint at a time: direction, amount, return
@@ -136,6 +137,9 @@ def main():
         check(rest)
     elif step == "park":
         park(rest)
+    elif step == "limits":
+        import limits_tool
+        limits_tool.run(rest)
     elif step == "jointtest":
         import jointtest
         jointtest.run(rest)

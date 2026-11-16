@@ -19,9 +19,32 @@ import numpy as np
 DH = [(0, 0, 169.77, 0), (-90, -90, 0, 64.2), (0, 0, 0, 305),
       (0, -90, 222.63, 0), (0, 90, 0, 0), (180, -90, 41, 0)]
 
-# Default joint limits (deg). The firmware also enforces its own configured limits.
-LIMITS = np.array([(-170, 170), (-42, 90), (-89, 52), (-180, 180), (-105, 105), (-180, 180)],
-                  dtype=float)
+# Joint limits (deg). Annin defaults below; set YOUR robot's values (the ones in the
+# HMI) with `python main.py limits`, which writes joint_limits.json next to this file.
+# Every tool (jog, IK, board moves, jointtest) reads them from here.
+import json as _json
+import os as _os
+
+DEFAULT_LIMITS = [(-170, 170), (-42, 90), (-89, 52), (-180, 180), (-105, 105), (-180, 180)]
+LIMITS_FILE = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "joint_limits.json")
+
+
+def load_limits(path=LIMITS_FILE):
+    lim = [list(x) for x in DEFAULT_LIMITS]
+    if _os.path.exists(path):
+        with open(path) as f:
+            data = _json.load(f)
+        for i in range(6):
+            v = data.get(f"J{i + 1}")
+            if v is not None:
+                lo, hi = float(v[0]), float(v[1])
+                if not lo < hi:
+                    raise ValueError(f"{path}: J{i + 1} limits {v} must be [low, high]")
+                lim[i] = [lo, hi]
+    return np.array(lim, dtype=float)
+
+
+LIMITS = load_limits()
 
 POS_TOL = 0.01      # mm
 ROT_TOL = 1e-4      # rad

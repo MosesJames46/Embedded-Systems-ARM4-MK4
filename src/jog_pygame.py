@@ -66,9 +66,10 @@ from robot_backend import connect, RobotFault, MAX_SPEED
 
 STEPS = [1, 2, 5, 10, 20, 50]
 V_MIN_Z = 120.0   # mm: re-orient the gripper only well above the table
-J1_LIMITS = (-165.0, 165.0)
-# Annin defaults (same as the HMI sliders); the firmware enforces its own configured limits too
-JOINT_LIMITS = [(-165, 165), (-40, 88), (-87, 50), (-178, 178), (-103, 103), (-178, 178)]
+# From joint_limits.json (python main.py limits), kept 2 deg inside them
+import kinematics as _K
+JOINT_LIMITS = [(float(lo) + 2, float(hi) - 2) for lo, hi in _K.LIMITS]
+J1_LIMITS = JOINT_LIMITS[0]
 JOINT_STEPS = [0.5, 1, 2, 5, 10]
 FLOOR_MARGIN_MM = 3.0
 

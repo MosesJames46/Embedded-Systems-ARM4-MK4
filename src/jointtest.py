@@ -27,7 +27,8 @@ from robot_backend import connect, RobotFault
 
 # Annin's default joint limits (degrees from zero). Your HMI settings may differ; the
 # firmware enforces the real ones and refuses moves beyond them.
-LIMITS = {1: (-170, 170), 2: (-42, 90), 3: (-89, 52), 4: (-180, 180), 5: (-105, 105), 6: (-180, 180)}
+import kinematics as _K
+LIMITS = {i + 1: (float(lo), float(hi)) for i, (lo, hi) in enumerate(_K.LIMITS)}  # joint_limits.json
 MARGIN = 5.0
 ANGLE_TOL = 0.5     # reported angle must match within this (deg)
 OTHER_TOL = 0.5     # other joints may not move more than this (deg)
