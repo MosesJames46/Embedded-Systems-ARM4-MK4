@@ -20,6 +20,12 @@ Run from the src folder:
     python main.py recognize    Live: every square labelled with piece type, colour, confidence
     python main.py board        Type a square (e4): the arm hovers over it
     python main.py boardview    Camera view with the 64 squares drawn; click = which square
+                                (board also does: move e2 e4, pick, place, drop, grip, open/close)
+    python main.py gripper      Find/test the gripper board (Nano), set open/closed angles, save
+    python main.py relabel      Fix corner names without re-teaching (mirror | rotate | ranks)
+    python main.py boardteach   Keyboard window to teach every square (W/A/S/D nudge, ENTER save + next)
+    python main.py camboard     Camera setup for move detection: click 4 board corners, test detection
+    python main.py play         Chess vs the arm, typed moves (--robot white|black, --nogripper, --dry)
 
 Extra options are passed through, e.g.
     python main.py check --camera 2
@@ -137,6 +143,21 @@ def main():
         check(rest)
     elif step == "park":
         park(rest)
+    elif step == "gripper":
+        import gripper_tool
+        gripper_tool.run(rest)
+    elif step == "relabel":
+        import chess_board
+        chess_board.relabel(rest)
+    elif step == "boardteach":
+        import board_teach
+        board_teach.run(rest)
+    elif step == "camboard":
+        import cam_moves
+        cam_moves.setup(rest)
+    elif step == "play":
+        import play
+        play.run(rest)
     elif step == "limits":
         import limits_tool
         limits_tool.run(rest)

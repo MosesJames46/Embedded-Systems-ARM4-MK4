@@ -154,6 +154,20 @@ class LegacyRobot:
     moves if the laptop model does not match this robot (e.g. a tool frame set in the HMI)."""
     supports_stop = False
 
+    WRIST_GUARD_DEG = 90.0   # refuse a move that would turn J4 or J6 more than this
+
+    def _wrist_guard(self, q0, qs, allow):
+        if allow:
+            return
+        for j in (3, 5):
+            turn = max(abs(q[j] - q0[j]) for q in qs)
+            if turn > self.WRIST_GUARD_DEG:
+                raise RobotFault(
+                    f"Move refused: it would turn the wrist (J{j + 1}) by {turn:.0f} deg. Board and "
+                    "game moves never need that - the gripper's finger direction is probably far "
+                    "from the one saved at a1. Park (P), or in jog press V and turn the fingers "
+                    "back with Z/X, then try again.")
+
     def __init__(self, port=None, loop_mode="000000", local_ik=True):
         from ar4link import AR4
         import kinematics as K
@@ -162,12 +176,26 @@ class LegacyRobot:
         self.port = self.a.port
         self.local_ik = False
         if local_ik:
-            p = self.a.pose()
-            if K.model_matches(p.joints, p.xyz, [p.rz, p.ry, p.rx]):
-                self.local_ik = True
-            else:
-                print("NOTE: the laptop arm model does not match this controller (tool frame or "
-                      "DH changed in the HMI?) - using the firmware's own moves.")
+            # check a few times: one bad reading must not switch to the firmware's moves
+            for _ in range(3):
+                try:
+                    p = self.a.pose()
+                except Exception:
+                    time.sleep(0.3)
+                    continue
+                if K.model_matches(p.joints, p.xyz, [p.rz, p.ry, p.rx]):
+                    self.local_ik = True
+                    break
+                time.sleep(0.3)
+            if not self.local_ik:
+                self.a.close()
+                raise RobotFault(
+                    "The laptop arm model does not match what the controller reports, so the safe "
+                    "laptop-planned moves cannot be used. (The controller's own moves have the "
+                    "wrist-flip bug, so this program will not fall back to them.)\n"
+                    "  Most likely a TOOL FRAME / tool offset is set in the HMI: set all tool "
+                    "frame values to 0, save, close the HMI and try again.\n"
+                    "  Otherwise: recalibrate in the HMI, close it, and try again.")
 
     @staticmethod
     def _conv(p):
@@ -186,7 +214,7 @@ class LegacyRobot:
             except AR4Error as e:
                 raise RobotFault(str(e))
 
-    def move_linear(self, x, y, z, rot, speed=10):
+    def move_linear(self, x, y, z, rot, speed=10, allow_wrist_turn=False):
         from ar4link import AR4Error
         _check_speed(speed)
         try:
@@ -194,6 +222,7 @@ class LegacyRobot:
                 return self._conv(self.a.move_linear(x, y, z, *rot, speed_pct=speed))
             q0 = self.a.pose().joints
             waypoints = self.K.plan_line(q0, (x, y, z), rot)
+            self._wrist_guard(q0, waypoints, allow_wrist_turn)
             p = None
             for q in waypoints:
                 p = self.a.move_joints(list(q), speed_pct=speed)
@@ -211,7 +240,7 @@ class LegacyRobot:
         except AR4Error as e:
             raise RobotFault(str(e))
 
-    def move_joint(self, x, y, z, rot, speed=10):
+    def move_joint(self, x, y, z, rot, speed=10, allow_wrist_turn=True):
         """Joint-interpolated move to a pose (path not straight). Used for parking."""
         from ar4link import AR4Error
         _check_speed(speed)
@@ -219,8 +248,8 @@ class LegacyRobot:
             if self.local_ik:
                 import numpy as np
                 q0 = self.a.pose().joints
-                q = self.K.ik(np.array([x, y, z], float), self.K.rotvec_to_R(rot), q0)
-                self.K.check_limits(q)
+                q = self.K.ik_best(np.array([x, y, z], float), self.K.rotvec_to_R(rot), q0)
+                self._wrist_guard(q0, [q], allow_wrist_turn)
                 return self._conv(self.a.move_joints(list(q), speed_pct=speed))
             return self._conv(self.a.move_joint(x, y, z, *rot, speed_pct=speed))
         except self.K.KinematicsError as e:

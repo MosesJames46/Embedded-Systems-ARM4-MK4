@@ -156,6 +156,9 @@ def ik(p, R, seed, iters=200):
         e = _error(q, p, R)
         if np.linalg.norm(e[:3]) > 0.5 or np.linalg.norm(e[3:]) / 200 > 0.01:
             raise KinematicsError("target out of reach for this gripper orientation")
+    # J1, J2, J3, J5 never need more than half a turn: wrap them into -180..180
+    for i in (0, 1, 2, 4):
+        q[i] = (q[i] + 180.0) % 360.0 - 180.0
     # keep J4/J6 nearest the seed (they are the wrap-around joints)
     for i in (3, 5):
         while q[i] - seed[i] > 180:
@@ -163,6 +166,38 @@ def ik(p, R, seed, iters=200):
         while q[i] - seed[i] < -180:
             q[i] += 360
     return q
+
+
+def ik_best(p, R, q0):
+    """For a long (joint) move: try several starting guesses and return the in-limits
+    solution closest to the current joints q0 - so a far target cannot land on an odd
+    branch (wrist folded the other way, base turned a full circle)."""
+    p = np.asarray(p, float)
+    q0 = np.asarray(q0, float)
+    j1 = np.degrees(np.arctan2(p[1], p[0]))
+    seeds = [q0, np.r_[j1, q0[1:]]]
+    for j5 in (40.0, -40.0, 10.0):
+        seeds.append(np.array([j1, 40.0, 20.0, 0.0, j5, q0[5]]))
+    best, best_cost, last = None, None, None
+    for s in seeds:
+        try:
+            q = ik(p, R, s)
+            q = np.array(q)
+            for i in (3, 5):                      # wrist turns nearest the CURRENT joints
+                while q[i] - q0[i] > 180:
+                    q[i] -= 360
+                while q[i] - q0[i] < -180:
+                    q[i] += 360
+            check_limits(q)
+        except KinematicsError as e:
+            last = e
+            continue
+        cost = np.max(np.abs(q - q0)) + 0.5 * (abs(q[3] - q0[3]) + abs(q[5] - q0[5]))
+        if best is None or cost < best_cost:
+            best, best_cost = q, cost
+    if best is None:
+        raise last or KinematicsError("target not reachable")
+    return best
 
 
 def check_limits(q, limits=LIMITS, margin=1.0):
