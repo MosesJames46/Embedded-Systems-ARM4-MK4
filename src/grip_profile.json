@@ -1,0 +1,32 @@
+{
+  "p": {
+    "height": 15.0,
+    "close": null,
+    "open": null
+  },
+  "n": {
+    "height": 15.0,
+    "close": null,
+    "open": null
+  },
+  "b": {
+    "height": 15.0,
+    "close": null,
+    "open": null
+  },
+  "r": {
+    "height": 15.0,
+    "close": null,
+    "open": null
+  },
+  "q": {
+    "height": 15.0,
+    "close": null,
+    "open": null
+  },
+  "k": {
+    "height": 20.0,
+    "close": 0,
+    "open": 94
+  }
+}
