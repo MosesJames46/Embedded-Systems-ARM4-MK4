@@ -166,7 +166,16 @@ def run(argv):
         screen.blit(small.render("a" + " " * 26 + "h", True, DIM), (x0 + 10, y0 + 8 * s + 2))
         pygame.display.flip()
 
+    def keep_last():
+        """After a nudge: keys pressed while the arm was moving - keep only the LAST one, so
+        a press is never lost but a held key cannot pile up moves."""
+        pending = pygame.event.get(pygame.KEYDOWN)
+        if pending:
+            pygame.event.post(pending[-1])
+
     def drain():
+        """After going to another square: drop keys pressed on the way (a double ENTER
+        must not save the next square before you have centred it)."""
         pygame.event.clear(pygame.KEYDOWN)
 
     try:
@@ -198,6 +207,8 @@ def run(argv):
                     running = False
                 elif k in (pygame.K_w, pygame.K_s, pygame.K_a, pygame.K_d):
                     mm = STEPS[state["step"]]
+                    say("MOVING ...", AMBER)
+                    draw()
                     if k == pygame.K_w:
                         h.nudge("far", mm)
                     elif k == pygame.K_s:
@@ -205,7 +216,7 @@ def run(argv):
                     else:
                         toward_a = (k == pygame.K_a) != state["flip"]
                         h.nudge("a" if toward_a else "h", mm)
-                    drain()
+                    keep_last()
                     say(f"nudged {mm} mm")
                 elif k == pygame.K_UP:
                     state["step"] = min(state["step"] + 1, len(STEPS) - 1)

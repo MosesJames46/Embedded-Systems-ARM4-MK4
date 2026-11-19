@@ -126,7 +126,147 @@ class PickPlace:
             return float(pr["height"]), pr["close"], pr.get("open")
         return self.grip_mm, None, None
 
+    adjust = False          # --adjust: pause above each grip/release to centre it
+    firmware = "6"
+    CHECK_MM = 25.0         # pause this far above the grip height to check centring
+
+    def _adjust_here(self, f, r, x, y, height):
+        """Stop just above the piece; the operator nudges until centred; the corrected
+        spot is saved to the board for that square. Returns the (possibly new) x, y."""
+        import numpy as np
+        import chess_board as cb
+        name = cb.square_name(int(round(f)), int(round(r)))
+        z = self._z_at(f, r, height + self.CHECK_MM)
+        self.arm.move_linear(x, y, z, self.rot, self.speed)
+        moved = False
+        here = np.array([x, y], float)
+        if getattr(self, "adjust_gui", True):
+            here, moved = self._adjust_window(name, f, r, here, z)
+        while not getattr(self, "adjust_gui", True):
+            ans = input(f"    {name}: centred? Enter = go | a/h/near/far + mm (e.g. h 2) > ").strip().lower()
+            if ans == "":
+                break
+            parts = ans.split()
+            dirs = {"a": (-1, 0), "h": (1, 0), "near": (0, -1), "far": (0, 1)}
+            if len(parts) != 2 or parts[0] not in dirs:
+                print("    e.g.  a 2   h 1   near 1.5   far 3")
+                continue
+            try:
+                mm = float(parts[1])
+            except ValueError:
+                continue
+            if abs(mm) > 15:
+                print("    at most 15 mm at a time")
+                continue
+            d = dirs[parts[0]]
+            v = np.array(self.board.grid_to_robot(f + d[0], r + d[1])) - np.array(self.board.grid_to_robot(f, r))
+            here = here + v / np.linalg.norm(v) * mm
+            try:
+                self.arm.move_linear(float(here[0]), float(here[1]), z, self.rot, self.speed)
+                moved = True
+            except RobotFault as e:
+                print("    ", e)
+                here = here - v / np.linalg.norm(v) * mm
+        if moved and float(f).is_integer() and float(r).is_integer() and 0 <= f <= 7 and 0 <= r <= 7:
+            self.board.set_point(name, float(here[0]), float(here[1]))
+            self.board.save(self.firmware)
+            print(f"    saved the corrected centre of {name}")
+        return float(here[0]), float(here[1])
+
+    def _adjust_window(self, name, f, r, here, z):
+        """Small keyboard window for centring: W/S toward rank 8/1, A/D toward a/h,
+        UP/DOWN step, ENTER go. Returns (xy, moved)."""
+        import json
+        import numpy as np
+        import pygame
+        steps = [0.5, 1.0, 2.0, 5.0]
+        si = 1
+        try:
+            with open(_os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "jog_settings.json")) as fh:
+                flip = bool(json.load(fh).get("boardteach_flip", False))
+        except (OSError, ValueError):
+            flip = False
+        start = here.copy()
+        u = np.array(self.board.grid_to_robot(f + 1, r)) - np.array(self.board.grid_to_robot(f, r))
+        v = np.array(self.board.grid_to_robot(f, r + 1)) - np.array(self.board.grid_to_robot(f, r))
+        u, v = u / np.linalg.norm(u), v / np.linalg.norm(v)
+        pygame.display.init()
+        pygame.font.init()
+        screen = pygame.display.set_mode((640, 230))
+        pygame.display.set_caption(f"Centre {name} - ENTER to go")
+        big = pygame.font.SysFont("monospace", 30, bold=True)
+        mid = pygame.font.SysFont("monospace", 19)
+        msg = ""
+
+        def draw():
+            d = here - start
+            screen.fill((24, 26, 32))
+            screen.blit(big.render(f"{name}: centre the gripper", True, (230, 230, 230)), (20, 15))
+            screen.blit(mid.render(f"moved {d @ u:+.1f} mm toward h   {d @ v:+.1f} mm toward rank 8",
+                                   True, (90, 200, 120)), (20, 65))
+            screen.blit(mid.render(f"step {steps[si]} mm (UP/DOWN)", True, (230, 230, 230)), (20, 95))
+            ad = "A toward h / D toward a" if flip else "A toward a / D toward h"
+            screen.blit(mid.render(f"W toward rank 8 / S toward rank 1   {ad}", True, (110, 160, 240)), (20, 125))
+            screen.blit(mid.render("ENTER = go     BACKSPACE = undo all nudges", True, (130, 130, 140)), (20, 155))
+            screen.blit(mid.render(msg[:60], True, (240, 180, 70)), (20, 190))
+            pygame.display.flip()
+
+        moved = False
+        try:
+            draw()
+            while True:
+                ev = pygame.event.wait()
+                if ev.type == pygame.QUIT:
+                    break
+                if ev.type != pygame.KEYDOWN:
+                    continue
+                k = ev.key
+                if k in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
+                    break
+                vec = None
+                if k == pygame.K_w:
+                    vec = v
+                elif k == pygame.K_s:
+                    vec = -v
+                elif k in (pygame.K_a, pygame.K_d):
+                    toward_a = (k == pygame.K_a) != flip
+                    vec = -u if toward_a else u
+                elif k == pygame.K_UP:
+                    si = min(si + 1, len(steps) - 1)
+                elif k == pygame.K_DOWN:
+                    si = max(si - 1, 0)
+                elif k == pygame.K_BACKSPACE:
+                    vec = start - here
+                    if np.linalg.norm(vec) < 1e-6:
+                        vec = None
+                    else:
+                        vec = vec / steps[si]          # scaled back below
+                msg = ""
+                if vec is not None:
+                    msg = "MOVING ..."
+                    draw()
+                    msg = ""
+                    target = here + vec * steps[si]
+                    if np.linalg.norm(target - start) > 15:
+                        msg = "at most 15 mm from the computed centre"
+                    else:
+                        try:
+                            self.arm.move_linear(float(target[0]), float(target[1]), z, self.rot, self.speed)
+                            here = target
+                            moved = bool(np.linalg.norm(here - start) > 1e-6)
+                        except RobotFault as e:
+                            msg = str(e)
+                    pending = pygame.event.get(pygame.KEYDOWN)     # keep only the last press
+                    if pending:
+                        pygame.event.post(pending[-1])
+                draw()
+        finally:
+            pygame.display.quit()
+        return here, moved
+
     def _down_up(self, f, r, x, y, action, height):
+        if self.adjust and float(f).is_integer() and 0 <= f <= 7 and 0 <= r <= 7:
+            x, y = self._adjust_here(f, r, x, y, height)
         z = self._z_at(f, r, height)
         self.arm.move_linear(x, y, z, self.rot, self.speed)
         action()

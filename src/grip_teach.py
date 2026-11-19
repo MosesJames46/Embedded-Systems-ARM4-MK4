@@ -142,6 +142,11 @@ def run(argv):
             screen.blit(mid.render(st["msg"][78:156], True, st["col"]), (20, y + 24))
         pygame.display.flip()
 
+    def keep_last():
+        pending = pygame.event.get(pygame.KEYDOWN)
+        if pending:
+            pygame.event.post(pending[-1])
+
     try:
         try:
             select("k")
@@ -176,13 +181,17 @@ def run(argv):
                 elif k == pygame.K_j:
                     jump = ""
                 elif k in (pygame.K_LCTRL, pygame.K_RCTRL):
+                    say("MOVING ...", AMBER); draw()
                     to_height(st["mm"] - STEPS[st["step"]])
-                    pygame.event.clear(pygame.KEYDOWN)
+                    say("")
+                    keep_last()
                     if st["mm"] <= MIN_MM:
                         say(f"Lowest allowed ({MIN_MM:.0f} mm above the board)", AMBER)
                 elif k == pygame.K_SPACE:
+                    say("MOVING ...", AMBER); draw()
                     to_height(st["mm"] + STEPS[st["step"]])
-                    pygame.event.clear(pygame.KEYDOWN)
+                    say("")
+                    keep_last()
                 elif k == pygame.K_UP:
                     st["step"] = min(st["step"] + 1, len(STEPS) - 1)
                 elif k == pygame.K_DOWN:
