@@ -15,6 +15,8 @@ import json
 import os
 import time
 
+import numpy as np
+
 MAX_SPEED = 25  # percent, hard cap for this project
 
 
@@ -174,31 +176,33 @@ class LegacyRobot:
         self.K = K
         self.a = AR4(port, loop_mode=loop_mode)
         self.port = self.a.port
-        self.local_ik = False
-        if local_ik:
-            # check a few times: one bad reading must not switch to the firmware's moves
-            for _ in range(3):
-                try:
-                    p = self.a.pose()
-                except Exception:
-                    time.sleep(0.3)
-                    continue
-                if K.model_matches(p.joints, p.xyz, [p.rz, p.ry, p.rx]):
-                    self.local_ik = True
-                    break
-                time.sleep(0.3)
-            if not self.local_ik:
-                self.a.close()
-                raise RobotFault(
-                    "The laptop arm model does not match what the controller reports, so the safe "
-                    "laptop-planned moves cannot be used. (The controller's own moves have the "
-                    "wrist-flip bug, so this program will not fall back to them.)\n"
-                    "  Most likely a TOOL FRAME / tool offset is set in the HMI: set all tool "
-                    "frame values to 0, save, close the HMI and try again.\n"
-                    "  Otherwise: recalibrate in the HMI, close it, and try again.")
+        # Every move is planned on the laptop from the JOINT angles and sent as joint
+        # commands, and every position this program reads is computed from the joint angles
+        # (pose() below). The controller's own X/Y/Z readout is never used, so it does not
+        # matter if it disagrees (tool frame in the HMI, or the 6.x readout drifting).
+        self.local_ik = bool(local_ik)
+        self.readout_gap = None
+        if self.local_ik:
+            try:
+                p = self.a.pose()
+                xyz, rv = K.pose_of(p.joints)
+                gap = float(np.linalg.norm(np.asarray(xyz) - np.asarray(p.xyz)))
+                Rd = K.rotvec_to_R(rv).T @ K.rotvec_to_R([p.rz, p.ry, p.rx])
+                ang = float(np.degrees(np.arccos(np.clip((np.trace(Rd) - 1) / 2, -1, 1))))
+                self.readout_gap = (gap, ang)
+                if gap > 1.0 or ang > 0.5:
+                    print(f"NOTE: the controller's X/Y/Z readout is {gap:.1f} mm / {ang:.1f} deg away "
+                          "from the position its joint angles give. Not a problem - this program "
+                          "only uses the joint angles. (`python main.py armcheck` shows details.)")
+            except Exception:
+                pass
 
-    @staticmethod
-    def _conv(p):
+    def _conv(self, p):
+        if self.local_ik:
+            # position from the joint angles (the controller's X/Y/Z readout can drift)
+            xyz, rv = self.K.pose_of(p.joints)
+            return {"x": float(xyz[0]), "y": float(xyz[1]), "z": float(xyz[2]),
+                    "rot": [float(v) for v in rv], "joints": list(p.joints), "flag": ""}
         return {"x": p.x, "y": p.y, "z": p.z, "rot": [p.rz, p.ry, p.rx],
                 "joints": p.joints, "flag": ""}
 

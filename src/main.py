@@ -23,6 +23,8 @@ Run from the src folder:
                                 (board also does: move e2 e4, pick, place, drop, grip, open/close)
     python main.py gripper      Find/test the gripper board (Nano), set open/closed angles, save
     python main.py relabel      Fix corner names without re-teaching (mirror | rotate | ranks)
+    python main.py armcheck     Controller X/Y/Z readout vs the joint angles (diagnostic)
+    python main.py piecetest    One piece, legal moves, log where each one lands (finds the cause of misses)
     python main.py gripteach    Keyboard window to set each piece's grip height / open / close live
     python main.py boardteach   Keyboard window to teach every square (W/A/S/D nudge, ENTER save + next)
     python main.py camboard     Camera setup for move detection: click 4 board corners, test detection
@@ -150,6 +152,12 @@ def main():
     elif step == "relabel":
         import chess_board
         chess_board.relabel(rest)
+    elif step == "armcheck":
+        import arm_check
+        arm_check.run(rest)
+    elif step == "piecetest":
+        import piece_test
+        piece_test.run(rest)
     elif step == "gripteach":
         import grip_teach
         grip_teach.run(rest)
