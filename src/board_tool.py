@@ -62,20 +62,28 @@ class Hover:
         self.arm, self.board, self.calib = arm, board, calib
         self.hover_mm = DEFAULT_HOVER_MM
         self.last = None
-        self.safe_z = board.max_z + cfg.SAFE_Z_MM
+        self.safe_z = board.max_z + min(cfg.SAFE_Z_MM, 90.0)   # ~100 mm above the board
 
     def rise(self):
-        p = self.arm.pose()
-        if p["z"] < self.safe_z - 1:
-            self.arm.move_linear(p["x"], p["y"], self.safe_z, p["rot"], cfg.SPEED_PCT)
+        from robot_backend import rise_to
+        return rise_to(self.arm, self.safe_z, self.board.max_z + 40.0, cfg.SPEED_PCT, self.board.tool_rot)
 
     def go(self, square):
         self.last = cb.square_name(*cb.square_index(square))
         x, y = self.board.square_to_robot(square)
         z = self.board.square_z(square) + self.hover_mm
         print(f"{square}: robot X {x:.1f}  Y {y:.1f}  hover Z {z:.1f}")
-        self.rise()
-        self.arm.move_linear(x, y, self.safe_z, self.board.tool_rot, cfg.SPEED_PCT)
+        zt = self.rise()
+        while True:                       # cross at the height reached; lower if the far side needs it
+            try:
+                self.arm.move_linear(x, y, zt, self.board.tool_rot, cfg.SPEED_PCT)
+                break
+            except RobotFault as e:
+                if "refused" not in str(e).lower() or zt - 20 < self.board.max_z + 40.0:
+                    raise
+                p = self.arm.pose()
+                zt -= 20.0
+                self.arm.move_linear(p["x"], p["y"], zt, self.board.tool_rot, cfg.SPEED_PCT)
         r = self.arm.move_linear(x, y, z, self.board.tool_rot, cfg.SPEED_PCT)
         print(f"  arrived; robot reports X {r['x']:.1f}  Y {r['y']:.1f}  Z {r['z']:.1f}")
 
@@ -195,6 +203,8 @@ def visit(argv):
     ap.add_argument("--firmware", choices=["8", "6"], default=None)
     ap.add_argument("--nogripper", action="store_true")
     ap.add_argument("--gripper-port", default=None)
+    ap.add_argument("--adjust", action="store_true", help="pause above each pick/place to centre it")
+    ap.add_argument("--adjust-text", action="store_true", help="--adjust with typed nudges, no window")
     args = ap.parse_args(argv)
     board = require_board()
     lines, warn, _ = board.report()
@@ -207,6 +217,8 @@ def visit(argv):
     import pickplace
     grip = pickplace.make_gripper(args.nogripper, args.gripper_port)
     pp = pickplace.PickPlace(arm, board, grip)
+    pp.adjust, pp.firmware = args.adjust or args.adjust_text, fw
+    pp.adjust_gui = not args.adjust_text
     cur_piece = None
     walk_lift = 50.0
     print(__doc__[__doc__.index("`board` commands"):])

@@ -123,12 +123,21 @@ def park(argv):
     arm = connect(fw, args.port, cfg.LOOP_MODE)
     try:
         cur = arm.pose()
-        # travel height: above the mat if it has been taught, else no lower than now or park
-        safe = (calib["board_z"] + cfg.SAFE_Z_MM if "board_z" in calib
-                else max(cur["z"], p["z"]))
+        # clearance over the pieces: from the taught board if there is one
+        import chess_board as cb
+        from robot_backend import rise_to
+        board = cb.ChessBoard.load()
+        if board is not None:
+            top = board.max_z + 80.0            # ~90 mm above the board: clears a king
+        elif "board_z" in calib:
+            top = calib["board_z"] + cfg.SAFE_Z_MM
+        else:
+            top = cur["z"] + 100.0
+        safe = min(top, p["z"])                 # never higher than the park pose itself
         if cur["z"] < safe - 1:
             print("Rising to safe height ...")
-            arm.move_linear(cur["x"], cur["y"], safe, cur["rot"], cfg.SPEED_PCT)
+            floor = (board.max_z + 40.0) if board is not None else cur["z"] + 30.0
+            rise_to(arm, safe, max(floor, cur["z"] + 10.0), cfg.SPEED_PCT, cur["rot"])
         print("Moving to park ...")
         r = arm.move_joint(p["x"], p["y"], p["z"], p["rot"], cfg.SPEED_PCT)
         print(f"Parked at X {r['x']:.1f}  Y {r['y']:.1f}  Z {r['z']:.1f}")

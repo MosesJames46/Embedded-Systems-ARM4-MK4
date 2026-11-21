@@ -271,6 +271,34 @@ class LegacyRobot:
         self.a.close()
 
 
+def rise_to(arm, z_target, z_min, speed=10, rot=None):
+    """Lift straight up at the current X/Y to z_target. Near the edges of the workspace a
+    high lift with the gripper pointing down is not reachable (J3/J5 limits), so step the
+    height down 20 mm at a time, but never below z_min. Returns the height reached.
+    (A refused move is planned first and never starts, so retrying is safe.)"""
+    p = arm.pose()
+    rot = rot if rot is not None else p["rot"]
+    if p["z"] >= z_target - 1:
+        return p["z"]
+    last = None
+    z = z_target
+    while z >= z_min - 1e-6:
+        if z <= p["z"] + 1:
+            return p["z"]
+        try:
+            arm.move_linear(p["x"], p["y"], z, rot, speed)
+            if z < z_target - 1:
+                print(f"  (lifted to Z {z:.0f} instead of {z_target:.0f} - arm limit here)")
+            return z
+        except RobotFault as e:
+            if "refused" not in str(e).lower():
+                raise
+            last = e
+        z -= 20.0
+    raise RobotFault(f"Cannot lift clear of the board from here ({last}). Jog the arm up a little "
+                     "(or toward the middle of the board) and try again.")
+
+
 def connect(firmware="8", port=None, loop_mode="000000"):
     if firmware == "8":
         return V8Robot(port)

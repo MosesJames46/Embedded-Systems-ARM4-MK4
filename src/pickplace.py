@@ -92,10 +92,8 @@ class PickPlace:
         return self.board.grid_z(f, r) - TAUGHT_MM + above_mm
 
     def rise(self):
-        p = self.arm.pose()
-        if p["z"] < self.travel_z - 1:
-            self.arm.move_linear(p["x"], p["y"], self.travel_z, self.rot, self.speed)
-        self.z_now = max(p["z"], self.travel_z)
+        from robot_backend import rise_to
+        self.z_now = rise_to(self.arm, self.travel_z, self.travel_z - 60.0, self.speed, self.rot)
 
     def _over(self, f, r):
         """Get over square (f, r) at travel height. Squares at the edge of reach (h8) cannot
