@@ -114,6 +114,20 @@ def rotate_about_world(rv_deg, axis, deg):
     return R_to_rotvec(R @ rotvec_to_R(rv_deg)).tolist()
 
 
+def tilt_toward(rv_deg, direction_xy, deg):
+    """Tilt an orientation so the gripper TIP swings by `deg` toward the horizontal
+    direction_xy (e.g. away from the robot base = the J5 direction). Rotation about the
+    horizontal axis perpendicular to that direction."""
+    r = np.array([direction_xy[0], direction_xy[1], 0.0], float)
+    r /= np.linalg.norm(r)
+    n = np.cross(r, [0.0, 0.0, 1.0])
+    n /= np.linalg.norm(n)
+    a = np.radians(deg)
+    Kx = np.array([[0, -n[2], n[1]], [n[2], 0, -n[0]], [-n[1], n[0], 0]])
+    Rn = np.eye(3) + np.sin(a) * Kx + (1 - np.cos(a)) * Kx @ Kx
+    return R_to_rotvec(Rn @ rotvec_to_R(rv_deg)).tolist()
+
+
 def tilt_from_down(rv_deg):
     """Degrees between the gripper axis and straight down (0 = pointing straight down)."""
     z = rotvec_to_R(rv_deg)[:, 2]

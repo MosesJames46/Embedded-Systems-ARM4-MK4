@@ -337,6 +337,17 @@ def tool_cmd(argv):
           "should be about 10 mm above the board.")
 
 
+def straight_down_rot(rv):
+    """Same finger direction (turn about the vertical), but pointing exactly straight down."""
+    import kinematics as K
+    R = K.rotvec_to_R(rv)
+    down = K.rotvec_to_R([0, 180, 0])
+    a, b = R[:, 0][:2], down[:, 0][:2]
+    yaw = np.arctan2(a[1], a[0]) - np.arctan2(b[1], b[0])
+    Rz = np.array([[np.cos(yaw), -np.sin(yaw), 0], [np.sin(yaw), np.cos(yaw), 0], [0, 0, 1]])
+    return [float(v) for v in K.R_to_rotvec(Rz @ down)]
+
+
 def straightdown_cmd(argv):
     """python main.py straightdown          show how far the gripper is from straight down
        python main.py straightdown fix      make it exactly straight down (keeps the finger
@@ -355,14 +366,7 @@ def straightdown_cmd(argv):
         if tilt > 0.2:
             print("Run `python main.py straightdown fix` to make it exactly straight down.")
         return
-    R = K.rotvec_to_R(rv)
-    down = K.rotvec_to_R([0, 180, 0])
-    # keep the finger direction: angle of the tool X axis around the vertical
-    a = R[:, 0][:2]
-    b = down[:, 0][:2]
-    yaw = np.arctan2(a[1], a[0]) - np.arctan2(b[1], b[0])
-    Rz = np.array([[np.cos(yaw), -np.sin(yaw), 0], [np.sin(yaw), np.cos(yaw), 0], [0, 0, 1]])
-    new = K.R_to_rotvec(Rz @ down)
+    new = straight_down_rot(rv)
     shutil.copy(BOARD_FILE, BOARD_FILE + ".bak")
     board.corners["a1"]["rot"] = [float(v) for v in new]
     nb = ChessBoard(board.corners, board.extra)

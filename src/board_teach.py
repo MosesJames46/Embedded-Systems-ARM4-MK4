@@ -18,6 +18,11 @@ nudges get smaller as you go.
     [ / ]        lift between squares down / up 10 mm (clears pieces on the way)
     G            gripper open / close (straddle a centred pawn to check)
     U            undo: forget the saved point on this square
+    V            point the gripper exactly straight down (keeps the finger direction)
+    Z / X        turn the fingers about the vertical (J6) by the step in degrees
+    I / K        tilt (J5 direction): gripper TIP swings away from / toward the robot base
+                 by the step in degrees - for when "straight down" does not LOOK vertical
+                 V, Z and X move the arm right away and are SAVED - every program uses them
     P            park          Q / ESC   quit
 """
 import argparse
@@ -89,6 +94,20 @@ def run(argv):
         state["msg"], state["col"] = m, col
         print(m)
 
+    import kinematics as K
+    state["yaw0"] = 0.0
+    state["tilt0"] = 0.0
+
+    def set_rot(new_rv, what):
+        board.corners["a1"]["rot"] = [float(v) for v in new_rv]
+        board.tool_rot = board.corners["a1"]["rot"]
+        board.save(fw)
+        p = arm.pose()
+        arm.move_linear(p["x"], p["y"], p["z"], board.tool_rot, cfg.SPEED_PCT)
+        q = arm.pose()["joints"]
+        say(f"{what} - saved. Tilt {K.tilt_from_down(board.tool_rot):.2f} deg from model-vertical; "
+            f"J5 {q[4]:.1f}  J6 {q[5]:.1f}", GREEN)
+
     def go_current():
         sq = ORDER[state["i"]]
         for lift in (state["lift"], min(state["lift"], 40.0), min(state["lift"], 25.0)):
@@ -117,7 +136,7 @@ def run(argv):
         return float(d @ u / np.linalg.norm(u)), float(d @ v / np.linalg.norm(v))
 
     pygame.init()
-    screen = pygame.display.set_mode((900, 470))
+    screen = pygame.display.set_mode((900, 520))
     pygame.display.set_caption("Board teach")
     big = pygame.font.SysFont("monospace", 34, bold=True)
     mid = pygame.font.SysFont("monospace", 20)
@@ -139,11 +158,16 @@ def run(argv):
         screen.blit(mid.render(f"step {STEPS[state['step']]} mm   hover {h.hover_mm:.0f} mm   lift "
                                f"{state['lift']:.0f} mm   saved {len(saved)}/64 squares", True, FG),
                     (20, y)); y += 30
+        screen.blit(small.render(f"gripper tilt {K.tilt_from_down(board.tool_rot):.2f} deg from straight down"
+                                 f"   tilted {state['tilt0']:+.1f} (I/K)  turned {state['yaw0']:+.1f} (Z/X) this session",
+                                 True, GREEN if K.tilt_from_down(board.tool_rot) < 0.3 else AMBER), (20, y))
+        y += 22
         ad = "A = toward h, D = toward a" if state["flip"] else "A = toward a, D = toward h"
         screen.blit(small.render(f"W = toward rank 8   S = toward rank 1   {ad}   (F swaps A/D)",
                                  True, BLUE), (20, y)); y += 24
         for line in ["ENTER save + next   RIGHT/LEFT next/prev (no save)   J+square jump   U undo",
-                     "UP/DOWN step   +/- hover (look only)   [ ] lift   G gripper   P park   Q quit"]:
+                     "UP/DOWN step   +/- hover (look only)   [ ] lift   G gripper   P park   Q quit",
+                     "V straight down   I/K tilt tip away/toward robot (J5)   Z/X turn fingers (J6)  - saved"]:
             screen.blit(small.render(line, True, DIM), (20, y)); y += 22
         if jump is not None:
             screen.blit(mid.render(f"jump to: {jump}_", True, AMBER), (20, y))
@@ -272,6 +296,22 @@ def run(argv):
                         grip.close()
                     else:
                         grip.open()
+                elif k == pygame.K_v:
+                    import chess_board as _cb
+                    set_rot(_cb.straight_down_rot(board.tool_rot), "Pointed straight down")
+                    keep_last()
+                elif k in (pygame.K_z, pygame.K_x):
+                    deg = STEPS[state["step"]] * (1 if k == pygame.K_z else -1)
+                    set_rot(K.rotate_about_vertical(board.tool_rot, deg), f"Fingers turned {deg:+g} deg")
+                    state["yaw0"] += deg
+                    keep_last()
+                elif k in (pygame.K_i, pygame.K_k):
+                    deg = STEPS[state["step"]] * (1 if k == pygame.K_i else -1)
+                    p = arm.pose()
+                    set_rot(K.tilt_toward(board.tool_rot, (p["x"], p["y"]), deg),
+                            f"Tip tilted {abs(deg):g} deg {'away from' if deg > 0 else 'toward'} the robot")
+                    state["tilt0"] += deg
+                    keep_last()
                 elif k == pygame.K_p:
                     h.park()
                     say("Parked. ENTER/RIGHT/LEFT to continue.")
