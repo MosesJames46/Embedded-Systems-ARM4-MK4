@@ -21,6 +21,8 @@ nudges get smaller as you go.
     1-6          piece type: 1 pawn 2 knight 3 bishop 4 rook 5 queen 6 king (loads its grip)
     CTRL / SPACE lower / raise the gripper by the step (fingertip height shown)
     O / C        open / close the jaws        G toggles them
+    E            open the jaws ALL the way (the widest angle, `full` in the gripper tool);
+                 M then saves that as this piece's opening
     [ / ]        open angle -/+ 2             , / .   close angle -/+ 2   (jaws move live)
     M            save height + open + close for this piece type (the game uses them)
     T            test: full pick-and-place on this square with the saved grip
@@ -128,6 +130,17 @@ def run(argv):
         arm.move_linear(p["x"], p["y"], z, board.tool_rot, cfg.SPEED_PCT)
         state["tip"] = mm
 
+    def full_open_angle():
+        try:
+            import gripper as G
+            st = G.load_settings()
+            if st.get("full") is not None:
+                return int(st["full"])
+        except Exception:
+            pass
+        # the end of the servo range on the opening side (0 or 90 worked on this gripper)
+        return 90 if base_open > base_close else 0
+
     def jaw_to(angle, which):
         if grip is None:
             say("No gripper board connected", AMBER)
@@ -211,7 +224,7 @@ def run(argv):
                                  True, BLUE), (20, y)); y += 24
         for line in ["ENTER save + next   RIGHT/LEFT next/prev (no save)   J+square jump   U undo",
                      "UP/DOWN step   +/- hover   PGUP/PGDN lift   P park   Q quit",
-                     "GRIP: 1-6 piece  CTRL/SPACE down/up  O/C G jaws  [ ] open  , . close  M save  T test",
+                     "GRIP: 1-6 piece  CTRL/SPACE down/up  O/C G jaws  E full open  [ ] open  , . close  M save  T test",
                      "V straight down   I/K tilt tip away/toward robot (J5)   Z/X turn fingers (J6)  - saved"]:
             screen.blit(small.render(line, True, DIM), (20, y)); y += 22
         if jump is not None:
@@ -336,6 +349,11 @@ def run(argv):
                     keep_last()
                 elif k == pygame.K_o:
                     jaw_to(state["open"], "open")
+                elif k == pygame.K_e:
+                    state["open"] = full_open_angle()
+                    jaw_to(state["open"], "open")
+                    say(f"Jaws fully open (angle {state['open']}). M saves it for "
+                        f"{pickplace.PIECES[state['t']]}; [ ] to back off.", GREEN)
                 elif k == pygame.K_c:
                     jaw_to(state["close"], "closed")
                 elif ch == "[":
@@ -356,14 +374,14 @@ def run(argv):
                         jaw_to(state["close"], "closed")
                 elif k == pygame.K_m:
                     t = state["t"]
-                    if state["tip"] is None or state["tip"] >= pickplace.TAUGHT_MM + h.hover_mm - 0.1:
-                        say("Lower to the gripping height first (CTRL), then M", AMBER)
-                    else:
+                    if state["tip"] is None:
+                        state["tip"] = pickplace.TAUGHT_MM + h.hover_mm
+                    if True:
                         prof[t]["height"] = round(state["tip"], 1)
                         prof[t]["open"], prof[t]["close"] = int(state["open"]), int(state["close"])
                         pickplace.save_profile(prof)
-                        say(f"Saved {pickplace.PIECES[t]} grip: height {state['tip']:.1f} mm, open "
-                            f"{state['open']}, close {state['close']}. T to test.", GREEN)
+                        say(f"Saved {pickplace.PIECES[t]} grip: fingertips {state['tip']:.1f} mm above the "
+                            f"board, open {state['open']}, close {state['close']}. T to test.", GREEN)
                 elif k == pygame.K_t:
                     if grip is None:
                         say("Test needs the gripper board connected", AMBER)
