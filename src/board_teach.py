@@ -14,9 +14,16 @@ nudges get smaller as you go.
     ENTER        save this square, go to the next
     RIGHT / LEFT next / previous square WITHOUT saving
     J + square   jump to a square, e.g. J then e then 4
-    + / -        hover height up / down 2 mm (only for looking; it is not saved)
-    [ / ]        lift between squares down / up 10 mm (clears pieces on the way)
-    G            gripper open / close (straddle a centred pawn to check)
+    + / -        hover height for going square to square, up / down 2 mm
+    PGUP / PGDN  lift between squares up / down 10 mm (clears pieces on the way)
+
+  Grip testing (the same as gripteach, on whatever square you are on):
+    1-6          piece type: 1 pawn 2 knight 3 bishop 4 rook 5 queen 6 king (loads its grip)
+    CTRL / SPACE lower / raise the gripper by the step (fingertip height shown)
+    O / C        open / close the jaws        G toggles them
+    [ / ]        open angle -/+ 2             , / .   close angle -/+ 2   (jaws move live)
+    M            save height + open + close for this piece type (the game uses them)
+    T            test: full pick-and-place on this square with the saved grip
     U            undo: forget the saved point on this square
     V            point the gripper exactly straight down (keeps the finger direction)
     Z / X        turn the fingers about the vertical (J6) by the step in degrees
@@ -95,8 +102,38 @@ def run(argv):
         print(m)
 
     import kinematics as K
+    import pickplace
     state["yaw0"] = 0.0
     state["tilt0"] = 0.0
+    TYPES = {"1": "p", "2": "n", "3": "b", "4": "r", "5": "q", "6": "k"}
+    prof = pickplace.load_profile()
+    base_open = grip.open_pos if grip else 45
+    base_close = grip.closed_pos if grip else 0
+
+    def load_piece(t):
+        state["t"] = t
+        pr = prof[t]
+        state["open"] = int(pr.get("open") if pr.get("open") is not None else base_open)
+        state["close"] = int(pr["close"] if pr["close"] is not None else base_close)
+
+    load_piece("p")
+    state["jaw"] = None
+    state["tip"] = None
+
+    def to_tip(mm):
+        mm = max(3.0, min(mm, 150.0))
+        sq = ORDER[state["i"]]
+        p = arm.pose()
+        z = board.square_z(sq) - pickplace.TAUGHT_MM + mm
+        arm.move_linear(p["x"], p["y"], z, board.tool_rot, cfg.SPEED_PCT)
+        state["tip"] = mm
+
+    def jaw_to(angle, which):
+        if grip is None:
+            say("No gripper board connected", AMBER)
+            return
+        grip.servo(int(angle))
+        state["jaw"] = which
 
     def set_rot(new_rv, what):
         board.corners["a1"]["rot"] = [float(v) for v in new_rv]
@@ -113,6 +150,7 @@ def run(argv):
         for lift in (state["lift"], min(state["lift"], 40.0), min(state["lift"], 25.0)):
             try:
                 h.hop(sq, lift)
+                state["tip"] = pickplace.TAUGHT_MM + h.hover_mm
                 say(f"At {sq}. Centre it, then ENTER." +
                     (f" (lifted only {lift:.0f} mm - arm limit)" if lift < state["lift"] else ""))
                 return True
@@ -136,7 +174,7 @@ def run(argv):
         return float(d @ u / np.linalg.norm(u)), float(d @ v / np.linalg.norm(v))
 
     pygame.init()
-    screen = pygame.display.set_mode((900, 520))
+    screen = pygame.display.set_mode((960, 580))
     pygame.display.set_caption("Board teach")
     big = pygame.font.SysFont("monospace", 34, bold=True)
     mid = pygame.font.SysFont("monospace", 20)
@@ -154,6 +192,12 @@ def run(argv):
             screen.blit(mid.render(f"moved {off[0]:+.1f} mm toward h, {off[1]:+.1f} mm toward rank 8",
                                    True, col), (20, y))
         y += 30
+        pr = prof[state["t"]]
+        tip = "?" if state["tip"] is None else f"{state['tip']:.1f}"
+        screen.blit(mid.render(f"{pickplace.PIECES[state['t']]} (1-6): tips {tip} mm up  jaws "
+                               f"{state['jaw'] or '?'}  open {state['open']}  close {state['close']}  "
+                               f"| saved h {pr['height']:.0f}", True, BLUE), (20, y))
+        y += 28
         saved = set(board.extra) | set(cb.CORNERS)
         screen.blit(mid.render(f"step {STEPS[state['step']]} mm   hover {h.hover_mm:.0f} mm   lift "
                                f"{state['lift']:.0f} mm   saved {len(saved)}/64 squares", True, FG),
@@ -166,7 +210,8 @@ def run(argv):
         screen.blit(small.render(f"W = toward rank 8   S = toward rank 1   {ad}   (F swaps A/D)",
                                  True, BLUE), (20, y)); y += 24
         for line in ["ENTER save + next   RIGHT/LEFT next/prev (no save)   J+square jump   U undo",
-                     "UP/DOWN step   +/- hover (look only)   [ ] lift   G gripper   P park   Q quit",
+                     "UP/DOWN step   +/- hover   PGUP/PGDN lift   P park   Q quit",
+                     "GRIP: 1-6 piece  CTRL/SPACE down/up  O/C G jaws  [ ] open  , . close  M save  T test",
                      "V straight down   I/K tilt tip away/toward robot (J5)   Z/X turn fingers (J6)  - saved"]:
             screen.blit(small.render(line, True, DIM), (20, y)); y += 22
         if jump is not None:
@@ -272,10 +317,66 @@ def run(argv):
                 elif ch == "-":
                     h.hover_mm = max(h.hover_mm - 2, 4)
                     go_current()
-                elif ch == "[":
+                elif k == pygame.K_PAGEDOWN:
                     state["lift"] = max(state["lift"] - 10, 20)
-                elif ch == "]":
+                elif k == pygame.K_PAGEUP:
                     state["lift"] = min(state["lift"] + 10, 150)
+                elif ch in TYPES:
+                    load_piece(TYPES[ch])
+                    pr = prof[state["t"]]
+                    say(f"{pickplace.PIECES[state['t']]}: saved grip height {pr['height']:.1f} mm, open "
+                        f"{state['open']}, close {state['close']}")
+                elif k in (pygame.K_LCTRL, pygame.K_RCTRL, pygame.K_SPACE):
+                    if state["tip"] is None:
+                        state["tip"] = pickplace.TAUGHT_MM + h.hover_mm
+                    d = STEPS[state["step"]] * (-1 if k != pygame.K_SPACE else 1)
+                    say("MOVING ...", AMBER); draw()
+                    to_tip(state["tip"] + d)
+                    say(f"fingertips {state['tip']:.1f} mm above the board")
+                    keep_last()
+                elif k == pygame.K_o:
+                    jaw_to(state["open"], "open")
+                elif k == pygame.K_c:
+                    jaw_to(state["close"], "closed")
+                elif ch == "[":
+                    state["open"] = max(0, state["open"] - 2)
+                    if state["jaw"] == "open":
+                        jaw_to(state["open"], "open")
+                elif ch == "]":
+                    state["open"] = min(180, state["open"] + 2)
+                    if state["jaw"] == "open":
+                        jaw_to(state["open"], "open")
+                elif ch == ",":
+                    state["close"] = max(0, state["close"] - 2)
+                    if state["jaw"] == "closed":
+                        jaw_to(state["close"], "closed")
+                elif ch == ".":
+                    state["close"] = min(180, state["close"] + 2)
+                    if state["jaw"] == "closed":
+                        jaw_to(state["close"], "closed")
+                elif k == pygame.K_m:
+                    t = state["t"]
+                    if state["tip"] is None or state["tip"] >= pickplace.TAUGHT_MM + h.hover_mm - 0.1:
+                        say("Lower to the gripping height first (CTRL), then M", AMBER)
+                    else:
+                        prof[t]["height"] = round(state["tip"], 1)
+                        prof[t]["open"], prof[t]["close"] = int(state["open"]), int(state["close"])
+                        pickplace.save_profile(prof)
+                        say(f"Saved {pickplace.PIECES[t]} grip: height {state['tip']:.1f} mm, open "
+                            f"{state['open']}, close {state['close']}. T to test.", GREEN)
+                elif k == pygame.K_t:
+                    if grip is None:
+                        say("Test needs the gripper board connected", AMBER)
+                    else:
+                        sq = ORDER[state["i"]]
+                        pp = pickplace.PickPlace(arm, board, grip)
+                        say(f"Testing {pickplace.PIECES[state['t']]} pick-and-place on {sq} ...", AMBER)
+                        draw()
+                        pp.move(sq, sq, state["t"])
+                        go_current()
+                        state["jaw"] = "open"
+                        say("Test done - adjust and M again, or ENTER to save the square.", GREEN)
+                        drain()
                 elif k == pygame.K_f:
                     state["flip"] = not state["flip"]
                     _save_flip(state["flip"])
@@ -290,12 +391,10 @@ def run(argv):
                         say(f"forgot {sq}; going to its computed position")
                         go_current()
                 elif k == pygame.K_g:
-                    if grip is None:
-                        say("No gripper board connected", AMBER)
-                    elif getattr(grip, "state", None) == "open":
-                        grip.close()
+                    if state["jaw"] == "open":
+                        jaw_to(state["close"], "closed")
                     else:
-                        grip.open()
+                        jaw_to(state["open"], "open")
                 elif k == pygame.K_v:
                     import chess_board as _cb
                     set_rot(_cb.straight_down_rot(board.tool_rot), "Pointed straight down")

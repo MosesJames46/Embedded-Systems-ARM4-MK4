@@ -1,28 +1,28 @@
 {
   "p": {
-    "height": 15.0,
-    "close": null,
-    "open": null
+    "height": 20.0,
+    "close": 0,
+    "open": 88
   },
   "n": {
-    "height": 15.0,
-    "close": null,
-    "open": null
+    "height": 26.0,
+    "close": 0,
+    "open": 90
   },
   "b": {
-    "height": 15.0,
-    "close": null,
-    "open": null
+    "height": 24.0,
+    "close": 0,
+    "open": 90
   },
   "r": {
-    "height": 15.0,
-    "close": null,
-    "open": null
+    "height": 16.0,
+    "close": 0,
+    "open": 90
   },
   "q": {
-    "height": 15.0,
-    "close": null,
-    "open": null
+    "height": 20.0,
+    "close": 0,
+    "open": 90
   },
   "k": {
     "height": 20.0,
