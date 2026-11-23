@@ -48,7 +48,10 @@ class ChessBoard:
         # taught tool height at each corner; squares in between are interpolated, because
         # the reported Z for the same real height grows with reach (arm sag / calibration)
         self.corner_z = {c: float(corners[c]["z"]) for c in CORNERS}
-        self.max_z = max(self.corner_z.values())
+        self._max_z0 = max(self.corner_z.values())
+        # extra length added to the fingers AFTER the board was taught (popsicle sticks):
+        # every height rises by this much so the new tips stay where the old tips were
+        self.tool_ext = getattr(self, "tool_ext", 0.0)
         self.tool_rot = corners["a1"]["rot"]
         self._build_corrections()
 
@@ -137,9 +140,14 @@ class ChessBoard:
     def square_to_robot(self, name):
         return self.grid_to_robot(*square_index(name))
 
+    @property
+    def max_z(self):
+        return self._max_z0 + self.tool_ext
+
     def grid_z(self, f, r):
-        """Taught tool Z (the height you jogged to) at grid (f, r)."""
-        return self._base_z(f, r) + self._correction(f, r)[1]
+        """Taught tool Z (the height you jogged to) at grid (f, r), plus any finger
+        extension added since (tool_extension_mm)."""
+        return self._base_z(f, r) + self._correction(f, r)[1] + self.tool_ext
 
     def _base_z(self, f, r):
         """Bilinear between the 4 corners."""
@@ -240,6 +248,7 @@ class ChessBoard:
                 "tool_rot": self.tool_rot, "square_mm": sq,
                 "heights": {k: round(self.square_z(k), 1) for k in self.all_squares()},
                 "extra": self.extra,
+                "tool_extension_mm": self.tool_ext,
                 "squares": {k: [round(x, 2), round(y, 2)] for k, (x, y) in self.all_squares().items()}}
         with open(path, "w") as f:
             json.dump(data, f, indent=2)
@@ -252,6 +261,7 @@ class ChessBoard:
         with open(path) as f:
             data = json.load(f)
         b = cls(data["corners"], data.get("extra"))
+        b.tool_ext = float(data.get("tool_extension_mm", 0.0))
         b.firmware = data.get("firmware")
         return b
 
@@ -283,6 +293,7 @@ def relabel(argv):
             "ranks": lambda f, r: (f, 7 - r)}[argv[0]]
     extra = {square_name(*flip(*square_index(sq))): p for sq, p in board.extra.items()}
     new = ChessBoard({k: board.corners[m[k]] for k in CORNERS}, extra)
+    new.tool_ext = board.tool_ext
     lines, warn = new.save(getattr(board, "firmware", None) or "6")
     print(f"Relabelled ({argv[0]}). Old file kept as chess_board.json.bak")
     for k in CORNERS:
@@ -292,3 +303,73 @@ def relabel(argv):
         print(f"  {k}: X {new.extra[k]['x']:.1f}  Y {new.extra[k]['y']:.1f}  (extra point)")
     for line in lines + ["WARNING: " + w for w in warn]:
         print(line)
+
+
+# --- finger extension (sticks) and straight-down gripper ---------------------------------
+def tool_cmd(argv):
+    """python main.py tool          show the finger extension in use
+       python main.py tool 45       the fingertips now reach 45 mm LOWER than when the board
+                                    was taught (sticks added) - every height rises 45 mm
+       python main.py tool 0        back to the original fingers
+    Re-teaching the corners in jog (N, B x4) is done WITH the new fingers, so it resets this to 0."""
+    import shutil
+    board = ChessBoard.load()
+    if board is None:
+        raise SystemExit("chess_board.json not found")
+    if not argv:
+        print(f"Finger extension: {board.tool_ext:g} mm")
+        print(tool_cmd.__doc__)
+        return
+    try:
+        mm = float(argv[0])
+    except ValueError:
+        print(tool_cmd.__doc__)
+        return
+    if not 0 <= mm <= 150:
+        raise SystemExit("extension 0-150 mm")
+    shutil.copy(BOARD_FILE, BOARD_FILE + ".bak")
+    old = board.tool_ext
+    board.tool_ext = mm
+    board.save(getattr(board, "firmware", None) or "6")
+    print(f"Finger extension {old:g} -> {mm:g} mm: every board height is now {mm - old:+g} mm "
+          f"(old file kept as chess_board.json.bak).")
+    print("Check before playing: `python main.py board --firmware 6`, `h 10`, `e4` - the NEW tips "
+          "should be about 10 mm above the board.")
+
+
+def straightdown_cmd(argv):
+    """python main.py straightdown          show how far the gripper is from straight down
+       python main.py straightdown fix      make it exactly straight down (keeps the finger
+                                            direction); every move uses this"""
+    import shutil
+    import kinematics as K
+    board = ChessBoard.load()
+    if board is None:
+        raise SystemExit("chess_board.json not found")
+    rv = board.corners["a1"]["rot"]
+    tilt = K.tilt_from_down(rv)
+    print(f"Gripper direction used for every move (saved at a1): {tilt:.2f} deg from straight down")
+    for L in (100, 150, 200):
+        print(f"   at {L} mm finger length that puts the tips {L * np.sin(np.radians(tilt)):.1f} mm sideways")
+    if not argv or argv[0] != "fix":
+        if tilt > 0.2:
+            print("Run `python main.py straightdown fix` to make it exactly straight down.")
+        return
+    R = K.rotvec_to_R(rv)
+    down = K.rotvec_to_R([0, 180, 0])
+    # keep the finger direction: angle of the tool X axis around the vertical
+    a = R[:, 0][:2]
+    b = down[:, 0][:2]
+    yaw = np.arctan2(a[1], a[0]) - np.arctan2(b[1], b[0])
+    Rz = np.array([[np.cos(yaw), -np.sin(yaw), 0], [np.sin(yaw), np.cos(yaw), 0], [0, 0, 1]])
+    new = K.R_to_rotvec(Rz @ down)
+    shutil.copy(BOARD_FILE, BOARD_FILE + ".bak")
+    board.corners["a1"]["rot"] = [float(v) for v in new]
+    nb = ChessBoard(board.corners, board.extra)
+    nb.tool_ext = board.tool_ext
+    nb.save(getattr(board, "firmware", None) or "6")
+    print(f"Now {K.tilt_from_down(new):.2f} deg from straight down, same finger direction "
+          "(old file kept as chess_board.json.bak).")
+    if tilt > 0.5:
+        print("The tilt was big enough to move the tips a little - check a1, e4 and h8 with "
+              "`board` and nudge + save any that are off.")

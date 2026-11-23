@@ -9,6 +9,8 @@ Run from the src folder:
     python main.py run       5. Live demo: G = hover over target, SPACE = stop, P = park, Q = quit
                                 In the video window: C new target, M multi-target mode (1-9 / click
                                 to select, A = visit all), + / - hover clearance, ] / [ target height
+    python main.py speed 15     Set the arm speed for every program (1-25 %); `speed 15 accel 20`
+                                Any command also takes --speed N / --accel N for one run
     python main.py park         Move the arm straight up, then to the saved park pose
     python main.py limits       Show / set joint limits (e.g. limits J3 -89 70) to match the HMI
     python main.py jog          Keyboard jog window (WASD = X/Y, SPACE/CTRL = up/down);
@@ -22,6 +24,8 @@ Run from the src folder:
     python main.py boardview    Camera view with the 64 squares drawn; click = which square
                                 (board also does: move e2 e4, pick, place, drop, grip, open/close)
     python main.py gripper      Find/test the gripper board (Nano), set open/closed angles, save
+    python main.py tool 45      Fingers now 45 mm longer (sticks): raise every board height by 45 mm
+    python main.py straightdown Show / fix (`straightdown fix`) the gripper's tilt from straight down
     python main.py relabel      Fix corner names without re-teaching (mirror | rotate | ranks)
     python main.py armcheck     Controller X/Y/Z readout vs the joint angles (diagnostic)
     python main.py piecetest    One piece, legal moves, log where each one lands (finds the cause of misses)
@@ -37,6 +41,7 @@ Extra options are passed through, e.g.
 Settings (marker distances, camera index, heights, speed) live in vision_config.py.
 Full procedure: MILESTONE4_RUNBOOK.md in the repo root.
 """
+import json
 import os
 import runpy
 import sys
@@ -145,12 +150,80 @@ def park(argv):
         arm.close()
 
 
+SPEED_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "speed.json")
+MAX_ACCEL = 30
+
+
+def _load_speed():
+    try:
+        with open(SPEED_FILE) as f:
+            d = json.load(f)
+        return float(d.get("speed", cfg.SPEED_PCT)), float(d.get("accel", 10))
+    except (OSError, ValueError):
+        return float(cfg.SPEED_PCT), 10.0
+
+
+def _apply_speed(speed, accel):
+    from robot_backend import MAX_SPEED
+    import ar4link
+    if not 1 <= speed <= MAX_SPEED:
+        raise SystemExit(f"speed must be 1-{MAX_SPEED} percent")
+    if not 1 <= accel <= MAX_ACCEL:
+        raise SystemExit(f"accel must be 1-{MAX_ACCEL} percent")
+    cfg.SPEED_PCT = speed
+    ar4link.ACCEL_PCT = accel
+
+
+def speed_cmd(argv):
+    """python main.py speed            show the saved speed / acceleration
+       python main.py speed 15         save 15 % as the speed for every program
+       python main.py speed 15 accel 20   ... and acceleration 20 %"""
+    sp, ac = _load_speed()
+    if argv:
+        try:
+            sp = float(argv[0])
+            if len(argv) >= 3 and argv[1] == "accel":
+                ac = float(argv[2])
+            elif len(argv) != 1:
+                raise ValueError
+        except ValueError:
+            print(speed_cmd.__doc__)
+            return
+        _apply_speed(sp, ac)
+        with open(SPEED_FILE, "w") as f:
+            json.dump({"speed": sp, "accel": ac}, f, indent=2)
+        print(f"Saved: speed {sp:g} %, acceleration {ac:g} % - every program uses this now.")
+    else:
+        print(f"Speed {sp:g} %, acceleration {ac:g} %  ({SPEED_FILE if os.path.exists(SPEED_FILE) else 'defaults'})")
+        print(speed_cmd.__doc__)
+
+
 def main():
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help", "help"):
         print(__doc__)
         return
     step, rest = sys.argv[1], sys.argv[2:]
+    # speed for THIS run: --speed N / --accel N on any command, else the saved default
+    sp, ac = _load_speed()
+    for flag in ("--speed", "--accel"):
+        if flag in rest:
+            i = rest.index(flag)
+            try:
+                v = float(rest[i + 1])
+            except (IndexError, ValueError):
+                raise SystemExit(f"{flag} needs a number, e.g. {flag} 15")
+            if flag == "--speed":
+                sp = v
+            else:
+                ac = v
+            del rest[i:i + 2]
+    _apply_speed(sp, ac)
+    if step == "speed":
+        speed_cmd(rest)
+        return
+    if step not in ("check", "vision", "relabel", "camboard", "train", "recognize"):
+        print(f"[speed {sp:g} %, accel {ac:g} %]")
     if step == "check":
         check(rest)
     elif step == "park":
@@ -158,6 +231,12 @@ def main():
     elif step == "gripper":
         import gripper_tool
         gripper_tool.run(rest)
+    elif step == "tool":
+        import chess_board
+        chess_board.tool_cmd(rest)
+    elif step == "straightdown":
+        import chess_board
+        chess_board.straightdown_cmd(rest)
     elif step == "relabel":
         import chess_board
         chess_board.relabel(rest)
